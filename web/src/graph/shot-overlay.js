@@ -3,6 +3,7 @@
 import { LiteGraph } from 'litegraph.js'
 
 const ZOOM_MAX = 8
+const RESIZE_PAD = 12   // 底部留白(节点单位)，露出 LiteGraph 右下角原生缩放手柄
 
 // 节点当前图片文件名（模板图片 name / 截图 image）
 function nameOf(node) {
@@ -135,7 +136,7 @@ export class ShotOverlay {
     const iw = e.img.naturalWidth, ih = e.img.naturalHeight
     if (!iw || !ih) return
     node.size[0] = Math.max(node.size[0], 240)
-    node.size[1] = this._bodyTop(node) + node.size[0] * ih / iw
+    node.size[1] = this._bodyTop(node) + node.size[0] * ih / iw + RESIZE_PAD
   }
 
   // 定位 wrap（节点画面区），再布局内部图片与裁剪框
@@ -150,7 +151,7 @@ export class ShotOverlay {
     Object.assign(e.wrap.style, {
       left: x + 'px', top: y + 'px',
       width: Math.max(0, node.size[0] * scale) + 'px',
-      height: Math.max(0, (node.size[1] - head) * scale) + 'px',
+      height: Math.max(0, (node.size[1] - head - RESIZE_PAD) * scale) + 'px',
     })
     // 文件名回显（点击复制）+ 重命名按钮；字号/内边距随画布缩放保持同比例
     const fname = nameOf(node)

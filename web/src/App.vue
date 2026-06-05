@@ -226,7 +226,13 @@ async function onImageAction(node, mode) {
     const file = mode === 'paste' ? await readClipboardImage() : await pickLocalImage()
     if (!file) return
     const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
-    const fname = `tpl_${node.id}_${Date.now()}.${ext}`
+    // 弹框指定名称（上传默认用原文件名，粘贴默认 tpl_<id>）
+    const suggested = mode === 'paste'
+      ? `tpl_${node.id}` : (file.name ? file.name.replace(/\.[^.]+$/, '') : `tpl_${node.id}`)
+    const input = prompt('图片名称', suggested)
+    if (input === null) return                       // 取消
+    let fname = input.trim() || suggested
+    if (!/\.[a-z0-9]+$/i.test(fname)) fname += '.' + ext   // 无扩展名则补上
     const r = await api.uploadImage(current.value, file, fname)
     node.properties.name = r.name
     shots.setImage(node, api.imageUrl(current.value, r.name), { fit: true })
