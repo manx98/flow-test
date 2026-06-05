@@ -79,6 +79,8 @@ function registerOne(spec) {
       })
       this._showShot = true
     }
+    // 图片预览节点：显示上游 PICTURE（ShotOverlay 渲染）
+    if (spec.type === 'vision/preview') this._showShot = true
     // 脚本节点：嵌多行代码编辑器（CodeOverlay 渲染），预留较大尺寸
     if (spec.type === 'script/python') this._showCode = true
     this.size = this.computeSize()

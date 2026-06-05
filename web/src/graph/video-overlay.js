@@ -36,7 +36,7 @@ export class VideoOverlay {
     video.tabIndex = 0
     Object.assign(video.style, {
       position: 'absolute', objectFit: 'fill', background: '#000',
-      zIndex: 50, outline: 'none', cursor: 'crosshair',
+      zIndex: 50, outline: 'none', cursor: 'default',
     })
     this._bindInput(video, conn)
     this.container.appendChild(video)

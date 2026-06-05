@@ -249,8 +249,9 @@ onMounted(async () => {
   lgcanvas.onDrawForeground = function (ctx) {
     prevForeground && prevForeground.call(this, ctx)
     reconcileInteractions()   // 连线/连接状态变化时挂载/卸载交互画面
+    reconcilePreviews()       // 图片预览节点跟随上游图片
     overlay.update()
-    shots.update(graph._nodes)   // 截图节点回显 + 裁剪框定位
+    shots.update(graph._nodes)   // 截图/模板/预览节点画面 + 裁剪框定位
     codes.update(graph._nodes)   // 脚本节点多行代码编辑器
   }
   setDeviceActionHandler(onDeviceAction)
@@ -472,6 +473,64 @@ async function onCapture(node) {
   } catch (e) {
     alert('截图失败: ' + e.message)
     status.value = '截图失败'
+  }
+}
+
+// 顺着图片来源解析出 { name, crop }（模板图片 / 截图含裁剪 / 预览透传）
+function pictureSource(node, depth = 0) {
+  if (!node || depth > 20) return null
+  const t = node._spec?.type
+  if (t === 'const/image') return node.properties?.name ? { name: node.properties.name, crop: null } : null
+  if (t === 'vision/screenshot') {
+    const name = node.properties?.image
+    if (!name) return null
+    const c = node.properties?.crop
+    return { name, crop: (c && c.w && c.h) ? c : null }
+  }
+  if (t === 'vision/preview') {
+    const s = (node.inputs || []).findIndex(i => i.name === 'picture')
+    return s >= 0 ? pictureSource(node.getInputNode(s), depth + 1) : null
+  }
+  return null
+}
+
+function loadImage(url) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url })
+}
+
+// 把图片裁剪区域生成 dataURL（带缓存）
+const _cropCache = new Map()
+async function croppedSource(name, crop) {
+  const key = `${name}|${crop.x},${crop.y},${crop.w},${crop.h}`
+  if (_cropCache.has(key)) return _cropCache.get(key)
+  const img = await loadImage(api.imageUrl(current.value, name))
+  const cvs = document.createElement('canvas')
+  cvs.width = crop.w; cvs.height = crop.h
+  cvs.getContext('2d').drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
+  const data = cvs.toDataURL('image/png')
+  if (_cropCache.size > 50) _cropCache.delete(_cropCache.keys().next().value)
+  _cropCache.set(key, data)
+  return data
+}
+
+// 图片预览节点：跟随其 picture 上游显示对应图片（截图带裁剪则显示裁剪区域）
+function reconcilePreviews() {
+  if (!graph || !shots) return
+  for (const node of graph._nodes) {
+    if (node._spec?.type !== 'vision/preview') continue
+    const s = (node.inputs || []).findIndex(i => i.name === 'picture')
+    const src = s >= 0 ? pictureSource(node.getInputNode(s)) : null
+    const sig = src ? `${src.name}|${src.crop ? `${src.crop.x},${src.crop.y},${src.crop.w},${src.crop.h}` : 'full'}` : ''
+    if (node._previewSig === sig) continue
+    node._previewSig = sig
+    if (!src) { shots.clear(node); continue }
+    if (src.crop) {
+      croppedSource(src.name, src.crop)
+        .then((d) => { if (node._previewSig === sig) shots.setImage(node, d) })
+        .catch(() => {})
+    } else {
+      shots.setImage(node, api.imageUrl(current.value, src.name))
+    }
   }
 }
 

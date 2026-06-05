@@ -76,6 +76,10 @@ _NODES = [
      "inputs": [_p("video", T.VIDEO, "1", True)],
      "outputs": [_p("picture", T.PICTURE, "*")],
      "properties": [{"name": "crop", "type": "rect", "default": None}], "widget": "capture"},
+    {"type": "vision/preview", "category": "视觉", "title": "图片预览",
+     "inputs": [_p("picture", T.PICTURE, "1", True)],
+     "outputs": [_p("picture", T.PICTURE, "*")],
+     "properties": [], "widget": "preview"},
 
     # ===== 查找 =====
     {"type": "vision/find_image", "category": "视觉", "title": "找图",
@@ -95,9 +99,19 @@ _NODES = [
      "outputs": [_exec_out(), _p("matches", T.MATCH, "*"), _p("count", T.NUMBER)],
      "properties": [{"name": "similarity", "type": "number", "default": 0.7}]},
 
-    # ===== 动作 =====
+    # ===== 坐标转换（Match → Point）=====
+    {"type": "geom/to_point", "category": "动作", "title": "坐标转换",
+     "inputs": [_p("match", T.MATCH, "1", True)],
+     "outputs": [_p("point", T.POINT, "*")],
+     "properties": [{"name": "anchor", "type": "enum",
+                     "options": ["center", "top-left", "top-right", "bottom-left", "bottom-right"],
+                     "default": "center"},
+                    {"name": "dx", "type": "int", "default": 0},
+                    {"name": "dy", "type": "int", "default": 0}]},
+
+    # ===== 动作（入参为点坐标 Point）=====
     {"type": "action/click", "category": "动作", "title": "点击",
-     "inputs": [_exec_in(), _p("target", T.MATCH, "1")],
+     "inputs": [_exec_in(), _p("target", T.POINT, "1")],
      "outputs": [_exec_out(), _p("mouse", T.MOUSE, "*")],
      "properties": [{"name": "button", "type": "enum", "options": ["left", "right", "middle"], "default": "left"},
                     {"name": "double", "type": "bool", "default": False}]},
@@ -106,11 +120,11 @@ _NODES = [
      "outputs": [_exec_out(), _p("keyboard", T.KEYBOARD, "*")],
      "properties": [{"name": "paste", "type": "bool", "default": False}]},
     {"type": "action/scroll", "category": "动作", "title": "滚动",
-     "inputs": [_exec_in(), _p("target", T.MATCH, "1")],
+     "inputs": [_exec_in(), _p("target", T.POINT, "1")],
      "outputs": [_exec_out(), _p("mouse", T.MOUSE, "*")],
      "properties": [{"name": "dy", "type": "int", "default": -1}]},
     {"type": "action/drag", "category": "动作", "title": "拖拽",
-     "inputs": [_exec_in(), _p("src", T.MATCH, "1"), _p("dst", T.MATCH, "1")],
+     "inputs": [_exec_in(), _p("src", T.POINT, "1"), _p("dst", T.POINT, "1")],
      "outputs": [_exec_out(), _p("mouse", T.MOUSE, "*")], "properties": []},
 
     # ===== 等待 =====
@@ -157,6 +171,11 @@ _NODES = [
     {"type": "const/number", "category": "数据", "title": "数值常量",
      "inputs": [], "outputs": [_p("number", T.NUMBER, "*")],
      "properties": [{"name": "value", "type": "number", "default": 0}]},
+    {"type": "const/point", "category": "数据", "title": "坐标常量",
+     "inputs": [_p("x", T.NUMBER, "1"), _p("y", T.NUMBER, "1")],
+     "outputs": [_p("point", T.POINT, "*")],
+     "properties": [{"name": "x", "type": "int", "default": 0},
+                    {"name": "y", "type": "int", "default": 0}]},
 
     # ===== 变量 =====
     {"type": "var/set", "category": "数据", "title": "设变量",

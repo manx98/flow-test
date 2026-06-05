@@ -236,9 +236,22 @@ def _eval_screenshot(ctx, node):
     return {"picture": visauto.Image(sub)}
 
 
+@handler("vision/preview", "eval")
+def _eval_preview(ctx, node):
+    return {"picture": ctx.get_input(node, "picture")}   # 透传，仅用于查看
+
+
 @handler("const/text", "eval")
 def _eval_text(ctx, node):
     return {"text": ctx.graph.prop(node, "value", "")}
+
+
+@handler("const/point", "eval")
+def _eval_point_const(ctx, node):
+    xi, yi = ctx.get_input(node, "x"), ctx.get_input(node, "y")
+    x = int(xi) if xi is not None else int(ctx.graph.prop(node, "x", 0))
+    y = int(yi) if yi is not None else int(ctx.graph.prop(node, "y", 0))
+    return {"point": visauto.Location(x, y)}
 
 
 @handler("const/number", "eval")
@@ -373,18 +386,57 @@ def _run_find_all(ctx, node):
     return "out"
 
 
-# ---- 动作 ----
+# ---- 坐标转换（Match → Point）----
+@handler("geom/to_point", "eval")
+def _eval_to_point(ctx, node):
+    m = ctx.get_input(node, "match")
+    if m is None:
+        return {"point": None}
+    anchor = ctx.graph.prop(node, "anchor", "center")
+    dx, dy = int(ctx.graph.prop(node, "dx", 0)), int(ctx.graph.prop(node, "dy", 0))
+    if anchor == "top-left":
+        x, y = m.x, m.y
+    elif anchor == "top-right":
+        x, y = m.x + m.w, m.y
+    elif anchor == "bottom-left":
+        x, y = m.x, m.y + m.h
+    elif anchor == "bottom-right":
+        x, y = m.x + m.w, m.y + m.h
+    else:  # center
+        c = m.center
+        x, y = c.x, c.y
+    return {"point": visauto.Location(x + dx, y + dy)}
+
+
+# ---- 动作（按点坐标执行；设备经 mouse 输出连线解析）----
+def _xy(p):
+    """点坐标取 (x, y)；兼容直接传入 Match/Region（取中心）。"""
+    c = getattr(p, "center", None)
+    if c is not None:
+        return c.x, c.y
+    return p.x, p.y
+
+
+def _mouse_dev(ctx, node):
+    dev = ctx.device_from_output(node, "mouse") or ctx.default_device()
+    if dev is None:
+        raise RuntimeError("动作节点未连到设备(Mouse)")
+    return dev
+
+
 @handler("action/click", "run")
 def _run_click(ctx, node):
-    m = ctx.get_input(node, "target")
-    if m is None:
-        raise RuntimeError("点击节点缺少目标(target)")
+    p = ctx.get_input(node, "target")
+    if p is None:
+        raise RuntimeError("点击节点缺少目标点(target)")
+    x, y = _xy(p)
+    dev = _mouse_dev(ctx, node)
     if ctx.graph.prop(node, "double", False):
-        m.double_click()
+        dev.mouse.double_click(x, y)
     elif ctx.graph.prop(node, "button", "left") == "right":
-        m.right_click()
+        dev.mouse.right_click(x, y)
     else:
-        m.click()
+        dev.mouse.click(x, y)
     return "out"
 
 
@@ -403,11 +455,12 @@ def _run_type(ctx, node):
 
 @handler("action/scroll", "run")
 def _run_scroll(ctx, node):
-    m = ctx.get_input(node, "target")
-    if m is None:
-        raise RuntimeError("滚动节点缺少目标(target)")
+    p = ctx.get_input(node, "target")
+    if p is None:
+        raise RuntimeError("滚动节点缺少目标点(target)")
+    x, y = _xy(p)
     dy = int(ctx.graph.prop(node, "dy", -1))
-    m.scroll(0, dy)
+    _mouse_dev(ctx, node).mouse.scroll(x, y, 0, dy)
     return "out"
 
 
@@ -416,8 +469,10 @@ def _run_drag(ctx, node):
     src = ctx.get_input(node, "src")
     dst = ctx.get_input(node, "dst")
     if src is None or dst is None:
-        raise RuntimeError("拖拽节点缺少 src/dst")
-    src.drag_drop(src, dst)
+        raise RuntimeError("拖拽节点缺少 src/dst 点")
+    sx, sy = _xy(src)
+    dx, dy = _xy(dst)
+    _mouse_dev(ctx, node).mouse.drag_drop(sx, sy, dx, dy)
     return "out"
 
 

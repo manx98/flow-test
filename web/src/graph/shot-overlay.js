@@ -112,6 +112,14 @@ export class ShotOverlay {
     try { e.wrap.remove() } catch (_) {}
   }
 
+  // 清空图片（保留覆盖层，显示空画面）——预览节点上游断开时用
+  clear(node) {
+    const e = this.entries.get(node)
+    if (!e) return
+    e.img.removeAttribute('src')
+    e.img.style.display = 'none'
+  }
+
   // 每帧：同步带图节点（截图 / 模板图片）+ 重定位 + 画面/裁剪布局
   update(nodes) {
     for (const node of [...this.entries.keys()]) {
@@ -119,7 +127,9 @@ export class ShotOverlay {
     }
     for (const node of nodes) {
       const t = node._spec?.type
-      if (t === 'vision/screenshot' || t === 'const/image') this._place(node, this.ensure(node))
+      if (t === 'vision/screenshot' || t === 'const/image' || t === 'vision/preview') {
+        this._place(node, this.ensure(node))
+      }
     }
   }
 
