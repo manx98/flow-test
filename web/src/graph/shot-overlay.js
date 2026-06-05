@@ -73,6 +73,7 @@ export class ShotOverlay {
     e = { wrap, img, sel, cap, ren, view: { zoom: 1, panX: null, panY: null }, dragging: null }
     this.entries.set(node, e)
     this._bindWheel(node, e)
+    this._bindPan(node, e)
     if (node._spec?.type === 'vision/screenshot') this._bindCrop(node, e)  // 仅截图节点支持裁剪
     cap.addEventListener('mousedown', (ev) => ev.stopPropagation())   // 不触发框选/拖拽
     cap.addEventListener('click', async (ev) => {
@@ -221,6 +222,34 @@ export class ShotOverlay {
       this._layout(node, e)
       this.canvas.setDirty(true, true)
     }, { passive: false })
+  }
+
+  // 右键拖拽平移画面（缩放后查看不同区域）
+  _bindPan(node, e) {
+    e.wrap.addEventListener('contextmenu', (ev) => ev.preventDefault())   // 禁右键菜单
+    e.wrap.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 2) return
+      const p = this._placement(e)
+      if (!p) return
+      ev.preventDefault(); ev.stopPropagation()
+      e.wrap.style.cursor = 'grabbing'
+      const sx = ev.clientX, sy = ev.clientY
+      const px0 = e.view.panX == null ? p.iw / 2 : e.view.panX
+      const py0 = e.view.panY == null ? p.ih / 2 : e.view.panY
+      const onMove = (m) => {
+        e.view.panX = Math.min(p.iw, Math.max(0, px0 - (m.clientX - sx) / p.scale))
+        e.view.panY = Math.min(p.ih, Math.max(0, py0 - (m.clientY - sy) / p.scale))
+        this._layout(node, e)
+        this.canvas.setDirty(true, true)
+      }
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+        e.wrap.style.cursor = 'crosshair'
+      }
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    })
   }
 
   _bindCrop(node, e) {
