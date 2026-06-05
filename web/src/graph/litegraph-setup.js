@@ -93,6 +93,19 @@ function registerOne(spec) {
     if (!dst) return false
     return compatible(type, dst.type)
   }
+  // 运行出错时在节点下方显示红色错误条（_error 由运行状态设置）
+  NodeClass.prototype.onDrawForeground = function (ctx) {
+    if (!this._error || (this.flags && this.flags.collapsed)) return
+    ctx.font = '11px monospace'
+    const pad = 6, w = this.size[0]
+    const lines = wrapText(ctx, '⚠ ' + this._error, w - pad * 2)
+    const h = lines.length * 14 + pad * 2
+    const y = this.size[1] + 4
+    ctx.fillStyle = 'rgba(120,20,20,0.96)'
+    ctx.fillRect(0, y, w, h)
+    ctx.fillStyle = '#ffd7d7'
+    lines.forEach((ln, i) => ctx.fillText(ln, pad, y + pad + 10 + i * 14))
+  }
   LiteGraph.registerNodeType(spec.type, NodeClass)
 }
 
@@ -199,6 +212,19 @@ function addWidgetFor(node, prop) {
     default:
       node.addWidget('text', name, prop.default == null ? '' : String(prop.default), set, opt())
   }
+}
+
+// 按节点宽度逐字符折行（兼容无空格长串），最多 6 行
+function wrapText(ctx, text, maxW) {
+  const lines = []
+  let cur = ''
+  for (const ch of text) {
+    if (ch === '\n') { lines.push(cur); cur = ''; continue }
+    if (cur && ctx.measureText(cur + ch).width > maxW) { lines.push(cur); cur = ch }
+    else cur += ch
+  }
+  if (cur) lines.push(cur)
+  return lines.slice(0, 6)
 }
 
 export function nodeSpec(type) {

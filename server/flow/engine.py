@@ -216,6 +216,26 @@ def _eval_image(ctx, node):
     return {"picture": visauto.Image(name)} if name else {"picture": None}
 
 
+@handler("vision/screenshot", "eval")
+def _eval_screenshot(ctx, node):
+    """截图节点输出框选区域作为模板。未截图或未框选则在本节点报错并中断。"""
+    name = ctx.graph.prop(node, "image", "")
+    if not name:
+        ctx.on_state(node["id"], "fail", "截图节点尚未截图")
+        raise RuntimeError("截图节点尚未截图")
+    crop = ctx.graph.prop(node, "crop", None)
+    if not (isinstance(crop, dict) and all(k in crop for k in ("x", "y", "w", "h"))):
+        ctx.on_state(node["id"], "fail", "截图节点未框选区域")
+        raise RuntimeError("截图节点未框选区域")
+    img = visauto.Image(name)
+    x, y, w, h = (int(crop["x"]), int(crop["y"]), int(crop["w"]), int(crop["h"]))
+    sub = img.mat[max(0, y):y + h, max(0, x):x + w]
+    if not sub.size:
+        ctx.on_state(node["id"], "fail", "截图节点框选区域无效")
+        raise RuntimeError("截图节点框选区域无效")
+    return {"picture": visauto.Image(sub)}
+
+
 @handler("const/text", "eval")
 def _eval_text(ctx, node):
     return {"text": ctx.graph.prop(node, "value", "")}

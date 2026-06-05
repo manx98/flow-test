@@ -282,14 +282,16 @@ async function save() {
 const STATUS_COLOR = { running: '#b58900', ok: '#2a7d4f', fail: '#c0392b', skip: '#555' }
 
 function resetNodeColors() {
-  for (const n of graph._nodes) { n.color = null; n.bgcolor = null }
+  for (const n of graph._nodes) { n.color = null; n.bgcolor = null; n._error = null }
   lgcanvas.setDirty(true, true)
 }
 
-function setNodeStatus(id, st) {
+function setNodeStatus(id, st, info) {
   const n = graph.getNodeById(id)
   if (!n) return
   n.color = STATUS_COLOR[st] || null
+  if (st === 'fail') n._error = info || '运行出错'
+  else if (st === 'running' || st === 'ok') n._error = null   // 重跑到此节点时清旧错误
   lgcanvas.setDirty(true, true)
 }
 
@@ -306,7 +308,7 @@ function run() {
   }
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data)
-    if (m.type === 'node') setNodeStatus(m.id, m.status)
+    if (m.type === 'node') setNodeStatus(m.id, m.status, m.info)
     else if (m.type === 'alert') showToast(m.message, m.level)
     else if (m.type === 'run' && m.status === 'done') {
       const r = m.report

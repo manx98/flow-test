@@ -89,6 +89,8 @@ async def ws_run(websocket: WebSocket, name: str):
             cmd = msg.get("cmd")
             if cmd == "run":
                 proj = Project(name)
+                if proj.exists:
+                    proj.register_imagepath()   # 确保 images/ 在搜索路径（模板/截图按裸名解析）
                 run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 run_dir = proj.run_dir(run_id) if proj.exists else None
 
