@@ -103,6 +103,7 @@ import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageAct
 import { VideoOverlay } from './graph/video-overlay.js'
 import { ShotOverlay } from './graph/shot-overlay.js'
 import { CodeOverlay } from './graph/code-overlay.js'
+import { ErrorOverlay } from './graph/error-overlay.js'
 import { DeviceConnection } from './webrtc/device.js'
 
 const projects = ref([])
@@ -230,6 +231,7 @@ let lgcanvas = null
 let overlay = null
 let shots = null
 let codes = null
+let errors = null
 
 onMounted(async () => {
   const catalog = await api.catalog()
@@ -245,6 +247,7 @@ onMounted(async () => {
   shots = new ShotOverlay(lgcanvas, overlayEl.value)
   shots.setRenameHandler(onRenameImage)
   codes = new CodeOverlay(lgcanvas, overlayEl.value)
+  errors = new ErrorOverlay(lgcanvas, overlayEl.value)
   const prevForeground = lgcanvas.onDrawForeground
   lgcanvas.onDrawForeground = function (ctx) {
     prevForeground && prevForeground.call(this, ctx)
@@ -253,6 +256,7 @@ onMounted(async () => {
     overlay.update()
     shots.update(graph._nodes)   // 截图/模板/预览节点画面 + 裁剪框定位
     codes.update(graph._nodes)   // 脚本节点多行代码编辑器
+    errors.update(graph._nodes)  // 运行错误（可选中/可复制）
   }
   setDeviceActionHandler(onDeviceAction)
   setCaptureHandler(onCapture)

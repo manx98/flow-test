@@ -400,7 +400,8 @@ def _eval_ocr_tesseract(ctx, node):
 
 @handler("ocr/paddle", "eval")
 def _eval_ocr_paddle(ctx, node):
-    key = ("paddle", ctx.graph.prop(node, "lang", "ch"),
+    key = ("paddle", ctx.graph.prop(node, "ocr_version", "auto"),
+           ctx.graph.prop(node, "lang", "ch"),
            bool(ctx.graph.prop(node, "use_gpu", False)),
            bool(ctx.graph.prop(node, "use_angle_cls", True)),
            bool(ctx.graph.prop(node, "det", True)),
@@ -408,8 +409,8 @@ def _eval_ocr_paddle(ctx, node):
     eng = _OCR_CACHE.get(key)
     if eng is None:
         from visauto.ocr.paddle import PaddleEngine
-        eng = PaddleEngine(lang=key[1], use_gpu=key[2], use_angle_cls=key[3],
-                           det=key[4], min_confidence=key[5])
+        eng = PaddleEngine(ocr_version=key[1], lang=key[2], use_gpu=key[3],
+                           use_angle_cls=key[4], det=key[5], min_confidence=key[6])
         _OCR_CACHE[key] = eng
     return {"ocr": eng}
 

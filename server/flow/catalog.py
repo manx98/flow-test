@@ -5,7 +5,23 @@
 """
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from . import types as T
+
+
+def _ver(pkg: str) -> "str | None":
+    """读已装包版本（不导入包本身，未装返回 None）。"""
+    try:
+        return _pkg_version(pkg)
+    except PackageNotFoundError:
+        return None
+
+
+def _engine_title(name: str, pkg: str) -> str:
+    v = _ver(pkg)
+    return f"{name} (v{v})" if v else f"{name} (未安装)"
 
 
 def _p(name, ptype, card="1", required=False):
@@ -102,14 +118,16 @@ _NODES = [
                     {"name": "timeout", "type": "number", "default": 0}]},
 
     # ===== OCR 引擎 =====
-    {"type": "ocr/tesseract", "category": "OCR", "title": "Tesseract 引擎",
+    {"type": "ocr/tesseract", "category": "OCR", "title": _engine_title("Tesseract 引擎", "pytesseract"),
      "inputs": [], "outputs": [_p("ocr", T.OCR, "*")],
      "properties": [{"name": "lang", "type": "string", "default": "eng"},
                     {"name": "config", "type": "string", "default": ""},
                     {"name": "min_confidence", "type": "number", "default": 0}]},
-    {"type": "ocr/paddle", "category": "OCR", "title": "PaddleOCR 引擎",
+    {"type": "ocr/paddle", "category": "OCR", "title": _engine_title("PaddleOCR 引擎", "paddleocr"),
      "inputs": [], "outputs": [_p("ocr", T.OCR, "*")],
-     "properties": [{"name": "lang", "type": "string", "default": "ch"},
+     "properties": [{"name": "ocr_version", "type": "enum",
+                     "options": ["auto", "PP-OCRv5", "PP-OCRv4", "PP-OCRv3"], "default": "auto"},
+                    {"name": "lang", "type": "string", "default": "ch"},
                     {"name": "use_gpu", "type": "bool", "default": False},
                     {"name": "use_angle_cls", "type": "bool", "default": True},
                     {"name": "det", "type": "bool", "default": True},
