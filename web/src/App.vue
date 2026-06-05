@@ -11,6 +11,7 @@
       <button @click="run" :disabled="!current || running">▶ 运行</button>
       <button @click="stop" :disabled="!running">■ 停止</button>
       <button @click="openHistory" :disabled="!current">运行历史</button>
+      <button @click="locateGraph" title="居中适配所有节点">⊹ 定位</button>
       <template v-if="lastResult">
         <a v-if="lastResult.pdf_url" :href="lastResult.pdf_url" target="_blank" class="dl">报告PDF</a>
         <a :href="lastResult.report_url" target="_blank" class="dl">JSON</a>
@@ -18,7 +19,30 @@
       </template>
       <span class="status">{{ status }}</span>
     </div>
-    <div class="stage" ref="stage">
+    <div class="body">
+      <div class="palette" :class="{ closed: !paletteOpen }">
+        <div class="palette-head">
+          <span v-if="paletteOpen">组件</span>
+          <button class="pal-toggle" :title="paletteOpen ? '收起' : '展开'" @click="togglePalette">
+            {{ paletteOpen ? '⟨' : '⟩' }}
+          </button>
+        </div>
+        <div v-if="paletteOpen" class="palette-body">
+          <div v-for="(items, cat) in categories" :key="cat" class="pal-cat">
+            <div class="pal-cat-head" @click="toggleCat(cat)">
+              <span class="pal-arrow">{{ collapsedCats[cat] ? '▸' : '▾' }}</span>{{ cat }}
+            </div>
+            <template v-if="!collapsedCats[cat]">
+              <div v-for="n in items" :key="n.type" class="pal-item"
+                   draggable="true" @dragstart="onNodeDragStart($event, n.type)" :title="n.type">
+                {{ n.title }}
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+    <div class="stage" ref="stage" @dragover="onCanvasDragOver" @drop="onCanvasDrop">
       <canvas ref="canvasEl" class="graph"></canvas>
       <div ref="overlayEl" class="overlay"></div>
 
@@ -67,12 +91,13 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { LGraph, LGraphCanvas } from 'litegraph.js'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { LGraph, LGraphCanvas, LiteGraph } from 'litegraph.js'
 import { api } from './api.js'
 import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageActionHandler } from './graph/litegraph-setup.js'
 import { VideoOverlay } from './graph/video-overlay.js'
@@ -83,6 +108,66 @@ import { DeviceConnection } from './webrtc/device.js'
 const projects = ref([])
 const current = ref('')
 const status = ref('')
+
+// 组件栏（侧边可折叠节点面板）
+const paletteOpen = ref(true)
+const catalogNodes = ref([])
+const collapsedCats = ref({})
+const categories = computed(() => {
+  const g = {}
+  for (const n of catalogNodes.value) (g[n.category || '其它'] ||= []).push(n)
+  return g
+})
+function toggleCat(cat) { collapsedCats.value = { ...collapsedCats.value, [cat]: !collapsedCats.value[cat] } }
+function togglePalette() {
+  paletteOpen.value = !paletteOpen.value
+  nextTick(() => { resize(); lgcanvas && lgcanvas.draw(true, true) })   // 布局更新后重算画布并强制重绘
+}
+
+// 居中适配：把所有节点框进视图（空图则回到原点 1:1）
+function locateGraph() {
+  if (!graph || !lgcanvas) return
+  const ds = lgcanvas.ds
+  const r = stage.value.getBoundingClientRect()
+  const nodes = graph._nodes || []
+  if (!nodes.length) {
+    ds.offset[0] = 0; ds.offset[1] = 0; ds.scale = 1
+    lgcanvas.setDirty(true, true)
+    return
+  }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const th = LiteGraph.NODE_TITLE_HEIGHT || 20
+  for (const n of nodes) {
+    minX = Math.min(minX, n.pos[0]); minY = Math.min(minY, n.pos[1] - th)
+    maxX = Math.max(maxX, n.pos[0] + n.size[0]); maxY = Math.max(maxY, n.pos[1] + n.size[1])
+  }
+  const pad = 40
+  const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY)
+  const scale = Math.max(0.1, Math.min((r.width - pad * 2) / bw, (r.height - pad * 2) / bh, 1.2))
+  ds.scale = scale
+  ds.offset[0] = (r.width / 2) / scale - (minX + maxX) / 2
+  ds.offset[1] = (r.height / 2) / scale - (minY + maxY) / 2
+  lgcanvas.setDirty(true, true)
+}
+function onNodeDragStart(ev, type) {
+  ev.dataTransfer.setData('text/node-type', type)
+  ev.dataTransfer.effectAllowed = 'copy'
+}
+function onCanvasDragOver(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy' }
+function onCanvasDrop(ev) {
+  ev.preventDefault()
+  const type = ev.dataTransfer.getData('text/node-type')
+  if (!type || !graph) return
+  const node = LiteGraph.createNode(type)
+  if (!node) return
+  // 屏幕坐标 → 画布坐标（overlay 定位公式的逆运算）
+  const rect = canvasEl.value.getBoundingClientRect()
+  const ds = lgcanvas.ds
+  node.pos = [(ev.clientX - rect.left) / ds.scale - ds.offset[0],
+              (ev.clientY - rect.top) / ds.scale - ds.offset[1]]
+  graph.add(node)
+  lgcanvas.setDirty(true, true)
+}
 const running = ref(false)
 const lastResult = ref(null)
 let runWs = null
@@ -149,6 +234,7 @@ let codes = null
 onMounted(async () => {
   const catalog = await api.catalog()
   registerCatalog(catalog)
+  catalogNodes.value = catalog.nodes
 
   graph = new LGraph()
   lgcanvas = new LGraphCanvas(canvasEl.value, graph)
@@ -420,7 +506,21 @@ html, body, #app { height: 100%; margin: 0; }
 .toolbar select, .toolbar button { padding: 3px 8px; }
 .toolbar .dl { color: #6cf; font-size: 12px; text-decoration: underline; }
 .toolbar .status { margin-left: auto; color: #9c9; font-size: 12px; }
-.stage { position: relative; flex: 1; overflow: hidden; }
+.body { display: flex; flex: 1; min-height: 0; }
+.palette { width: 180px; background: #232323; color: #ddd; display: flex; flex-direction: column;
+  border-right: 1px solid #111; flex-shrink: 0; }
+.palette.closed { width: 26px; }
+.palette-head { display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px; background: #2b2b2b; font-size: 13px; }
+.pal-toggle { background: none; border: none; color: #ccc; cursor: pointer; font-size: 14px; padding: 0 2px; }
+.palette-body { overflow: auto; flex: 1; }
+.pal-cat-head { padding: 5px 8px; font-size: 12px; color: #9cc; cursor: pointer; user-select: none;
+  background: #282828; border-top: 1px solid #1c1c1c; }
+.pal-arrow { display: inline-block; width: 12px; color: #888; }
+.pal-item { padding: 4px 8px 4px 22px; font-size: 12px; cursor: grab; border-bottom: 1px solid #262626; }
+.pal-item:hover { background: #314050; }
+.pal-item:active { cursor: grabbing; }
+.stage { position: relative; flex: 1; overflow: hidden; background: #1e1e1e; }
 .graph { position: absolute; inset: 0; }
 .overlay { position: absolute; inset: 0; pointer-events: none; }
 .overlay > video { pointer-events: auto; }
