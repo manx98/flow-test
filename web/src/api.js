@@ -11,6 +11,8 @@ async function req(url, opts) {
 export const api = {
   health: () => req('/api/health'),
   catalog: () => req('/api/nodes'),
+  complete: (code, line, column) =>
+    req('/api/complete', { method: 'POST', headers: J, body: JSON.stringify({ code, line, column }) }).then(d => d.completions),
   // 工程
   listProjects: () => req('/api/projects').then(d => d.projects),
   createProject: (name) => req('/api/projects', { method: 'POST', headers: J, body: JSON.stringify({ name }) }),

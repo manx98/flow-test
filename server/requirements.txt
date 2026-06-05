@@ -9,5 +9,6 @@ reportlab         # 测试报告 PDF 导出（内置 CJK 字体，支持中文�
 websocket-client
 aardwolf
 pyvmomi
+jedi
 # 复用根 requirements.txt 的 visauto 依赖（numpy/opencv/...）
 # RDP/noVNC 后端按需：aardwolf / websocket-client / cryptography

@@ -79,8 +79,11 @@ function registerOne(spec) {
       })
       this._showShot = true
     }
+    // 脚本节点：嵌多行代码编辑器（CodeOverlay 渲染），预留较大尺寸
+    if (spec.type === 'script/python') this._showCode = true
     this.size = this.computeSize()
     if (this._showVideo || this._showShot) this.size[1] = Math.max(this.size[1], 220)
+    if (this._showCode) { this.size[0] = Math.max(this.size[0], 300); this.size[1] = Math.max(this.size[1], 200) }
   }
   NodeClass.title = spec.title
   NodeClass.desc = spec.type
@@ -190,7 +193,7 @@ function addWidgetFor(node, prop) {
     case 'string':
       node.addWidget('text', name, prop.default ?? '', set, opt()); break
     case 'code':
-      node.addWidget('text', name, prop.default ?? '', set, opt({ multiline: true })); break
+      break   // 代码：无单行文本框，由脚本节点的多行编辑器(CodeOverlay)处理
     case 'rect':
       break   // 裁剪框：无输入框，由截图节点的框选交互写入
     default:

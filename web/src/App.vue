@@ -77,6 +77,7 @@ import { api } from './api.js'
 import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageActionHandler } from './graph/litegraph-setup.js'
 import { VideoOverlay } from './graph/video-overlay.js'
 import { ShotOverlay } from './graph/shot-overlay.js'
+import { CodeOverlay } from './graph/code-overlay.js'
 import { DeviceConnection } from './webrtc/device.js'
 
 const projects = ref([])
@@ -143,6 +144,7 @@ let graph = null
 let lgcanvas = null
 let overlay = null
 let shots = null
+let codes = null
 
 onMounted(async () => {
   const catalog = await api.catalog()
@@ -156,12 +158,14 @@ onMounted(async () => {
   overlay = new VideoOverlay(lgcanvas, overlayEl.value)
   shots = new ShotOverlay(lgcanvas, overlayEl.value)
   shots.setRenameHandler(onRenameImage)
+  codes = new CodeOverlay(lgcanvas, overlayEl.value)
   const prevForeground = lgcanvas.onDrawForeground
   lgcanvas.onDrawForeground = function (ctx) {
     prevForeground && prevForeground.call(this, ctx)
     reconcileInteractions()   // 连线/连接状态变化时挂载/卸载交互画面
     overlay.update()
     shots.update(graph._nodes)   // 截图节点回显 + 裁剪框定位
+    codes.update(graph._nodes)   // 脚本节点多行代码编辑器
   }
   setDeviceActionHandler(onDeviceAction)
   setCaptureHandler(onCapture)

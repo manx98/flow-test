@@ -448,7 +448,7 @@ def _run_alert(ctx, node):
 @handler("script/python", "run")
 def _run_script(ctx, node):
     code = ctx.graph.prop(node, "code", "")
-    inp = ctx.get_input(node, "in") or {}
+    inp = ctx.get_input(node, "bundle") or {}
     out: dict = {}
     ns = {
         "visauto": visauto,
@@ -459,7 +459,7 @@ def _run_script(ctx, node):
         "Pattern": Pattern,
     }
     exec(compile(code, "<script-node>", "exec"), ns)
-    ctx.set_output(node, "out", out)
+    ctx.set_output(node, "bundle", out)
     return "out"
 
 

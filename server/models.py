@@ -21,3 +21,9 @@ class Meta(BaseModel):
 
 class RenameImage(BaseModel):
     name: str   # 新文件名
+
+
+class CompleteReq(BaseModel):
+    code: str
+    line: int       # 1 基（用户代码内）
+    column: int     # 0 基

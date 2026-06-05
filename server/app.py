@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import CreateProject, FlowGraph, Meta, RenameImage
+from .models import CompleteReq, CreateProject, FlowGraph, Meta, RenameImage
 from .project import Project, list_projects
 
 app = FastAPI(title="flow-test 测试工作流服务端")
@@ -156,6 +156,16 @@ def api_get_result(name: str, run: str, fname: str):
     if not os.path.exists(path):
         raise HTTPException(404, "结果文件不存在")
     return FileResponse(path)
+
+
+# ======================= 脚本代码补全（jedi）=======================
+@app.post("/api/complete")
+def api_complete(body: CompleteReq):
+    from .complete import complete
+    try:
+        return {"completions": complete(body.code, body.line, body.column)}
+    except ImportError:
+        raise HTTPException(503, "代码补全需要 jedi：pip install jedi")
 
 
 # ======================= 节点目录（前端建面板用）=======================
