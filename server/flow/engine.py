@@ -373,12 +373,45 @@ def _run_find_image(ctx, node):
 def _run_find_text(ctx, node):
     dev = _need_dev_in(ctx, node)
     text = ctx.get_input(node, "text") or ""
+    ocr = ctx.get_input(node, "ocr")   # 可选；缺省回退会话默认引擎
     regex = bool(ctx.graph.prop(node, "regex", False))
     timeout = float(ctx.graph.prop(node, "timeout", 0))
-    m = dev.exists(text=text, regex=regex, timeout=timeout)
+    m = dev.exists(text=text, regex=regex, ocr=ocr, timeout=timeout)
     ctx.set_output(node, "match", m)
     ctx.set_output(node, "ok", m is not None)
     return "found" if m is not None else "notFound"
+
+
+# ---- OCR 引擎（构造较重，按配置全局缓存复用）----
+_OCR_CACHE: dict = {}
+
+
+@handler("ocr/tesseract", "eval")
+def _eval_ocr_tesseract(ctx, node):
+    key = ("tesseract", ctx.graph.prop(node, "lang", "eng"),
+           ctx.graph.prop(node, "config", ""), float(ctx.graph.prop(node, "min_confidence", 0)))
+    eng = _OCR_CACHE.get(key)
+    if eng is None:
+        from visauto.ocr.tesseract import TesseractEngine
+        eng = TesseractEngine(lang=key[1], config=key[2], min_confidence=key[3])
+        _OCR_CACHE[key] = eng
+    return {"ocr": eng}
+
+
+@handler("ocr/paddle", "eval")
+def _eval_ocr_paddle(ctx, node):
+    key = ("paddle", ctx.graph.prop(node, "lang", "ch"),
+           bool(ctx.graph.prop(node, "use_gpu", False)),
+           bool(ctx.graph.prop(node, "use_angle_cls", True)),
+           bool(ctx.graph.prop(node, "det", True)),
+           float(ctx.graph.prop(node, "min_confidence", 0)))
+    eng = _OCR_CACHE.get(key)
+    if eng is None:
+        from visauto.ocr.paddle import PaddleEngine
+        eng = PaddleEngine(lang=key[1], use_gpu=key[2], use_angle_cls=key[3],
+                           det=key[4], min_confidence=key[5])
+        _OCR_CACHE[key] = eng
+    return {"ocr": eng}
 
 
 @handler("vision/find_all", "run")
