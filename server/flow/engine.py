@@ -205,8 +205,14 @@ def _run_device(ctx, node):
     return "out"
 
 
+def _eval_device(ctx, node):
+    dev = ctx.get_device(node)   # 屏幕尺寸（按需连接设备）
+    return {"width": int(dev.w), "height": int(dev.h)}
+
+
 for _dt in ("device/local", "device/novnc", "device/rdp", "device/pve", "device/vmware"):
     HANDLERS.setdefault(_dt, {})["run"] = _run_device
+    HANDLERS[_dt]["eval"] = _eval_device
 
 
 # ---- 纯数据（eval）----
