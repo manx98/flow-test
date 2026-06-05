@@ -1,0 +1,13 @@
+# 测试工作流服务端依赖（在 visauto 之上）
+fastapi
+uvicorn[standard]
+aiortc            # WebRTC（视频 + DataChannel）
+av                # 帧编码
+websockets
+python-multipart  # 图片上传
+reportlab         # 测试报告 PDF 导出（内置 CJK 字体，支持中文）
+websocket-client
+aardwolf
+pyvmomi
+# 复用根 requirements.txt 的 visauto 依赖（numpy/opencv/...）
+# RDP/noVNC 后端按需：aardwolf / websocket-client / cryptography
