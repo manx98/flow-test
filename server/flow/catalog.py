@@ -24,6 +24,10 @@ def _engine_title(name: str, pkg: str) -> str:
     return f"{name} (v{v})" if v else f"{name} (未安装)"
 
 
+# 变量 value 端口可选类型（自定义连接点类型）
+_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR]
+
+
 def _p(name, ptype, card="1", required=False):
     return {"name": name, "type": ptype, "cardinality": card,
             "required": required, "kind": "exec" if ptype == T.EXEC else "data"}
@@ -218,22 +222,16 @@ _NODES = [
      "properties": [{"name": "x", "type": "int", "default": 0},
                     {"name": "y", "type": "int", "default": 0}]},
 
-    # ===== 变量 =====
+    # ===== 变量（value 连接点类型可自定义，前端随 type 属性切换）=====
     {"type": "var/set", "category": "数据", "title": "设变量",
-     "inputs": [_exec_in(), _p("value", T.ANY, "1")], "outputs": [_exec_out()],
-     "properties": [{"name": "name", "type": "string", "default": "v"}]},
+     "inputs": [_exec_in()], "outputs": [_exec_out()],
+     "properties": [{"name": "type", "type": "enum", "options": _VAR_TYPES, "default": _VAR_TYPES[0]}]},
     {"type": "var/get", "category": "数据", "title": "取变量",
-     "inputs": [], "outputs": [_p("value", T.ANY, "*")],
-     "properties": [{"name": "name", "type": "string", "default": "v"}]},
+     "inputs": [], "outputs": [_p("value", _VAR_TYPES[0], "*")],
+     "properties": [{"name": "name", "type": "string", "default": "v"},
+                    {"name": "type", "type": "enum", "options": _VAR_TYPES, "default": _VAR_TYPES[0]}]},
 
-    # ===== 聚合/脚本/日志 =====
-    {"type": "bundle/pack", "category": "聚合", "title": "打包",
-     "inputs": [_p("a", T.ANY, "1"), _p("b", T.ANY, "1"), _p("c", T.ANY, "1")],
-     "outputs": [_p("bundle", T.BUNDLE, "*")], "properties": []},
-    {"type": "bundle/unpack", "category": "聚合", "title": "拆包",
-     "inputs": [_p("bundle", T.BUNDLE, "1")],
-     "outputs": [_p("a", T.ANY, "*"), _p("b", T.ANY, "*"), _p("c", T.ANY, "*")],
-     "properties": []},
+    # ===== 脚本/日志 =====
     {"type": "script/python", "category": "脚本", "title": "Python 脚本",
      "inputs": [_exec_in(), _p("bundle", T.BUNDLE, "1")],
      "outputs": [_exec_out(), _p("bundle", T.BUNDLE, "*")],

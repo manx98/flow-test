@@ -48,9 +48,6 @@ function registerOne(spec) {
       addWidgetFor(this, prop)
     }
     this._spec = spec
-    // Bundle 打包/拆包：动态增减命名字段端口
-    if (spec.type === 'bundle/pack') addFieldButtons(this, 'input')
-    if (spec.type === 'bundle/unpack') addFieldButtons(this, 'output')
     // 设备节点：仅连接/断开按钮（不内嵌画面、不接管控制——交给「人机交互」节点）
     if (spec.category === '设备') {
       this.addWidget('button', '▶ 连接 / 断开', null, () => {
@@ -83,6 +80,65 @@ function registerOne(spec) {
       })
       this._showShot = true
     }
+    // 设变量：动态端口（每个端口=一个变量），一次可设多个；类型取自 type 下拉
+    if (spec.type === 'var/set') {
+      this.addWidget('button', '+ 变量', null, () => {
+        const name = (prompt('变量名') || '').trim()
+        if (!name) return
+        if ((this.inputs || []).some((i) => i.name === name)) { alert('变量名重复'); return }
+        this.addInput(name, this.properties.type)
+        this.setDirtyCanvas(true, true)
+      })
+      this.addWidget('button', '- 变量', null, (w, canvas, node, pos, event) => {
+        const names = (this.inputs || []).filter((i) => i.type !== 'exec').map((i) => i.name)
+        if (!names.length) return
+        new LiteGraph.ContextMenu(names, {
+          event, title: '删除变量',
+          callback: (name) => {
+            const slot = this.findInputSlot(name)
+            if (slot >= 0) { this.removeInput(slot); this.setDirtyCanvas(true, true) }
+          },
+        })
+      })
+    }
+    // 取变量：value 连接点类型随 type 属性切换（自定义连接点类型）
+    if (spec.type === 'var/get') {
+      const isSet = false
+      this._applyVarType = () => {
+        const t = this.properties.type
+        if (!t) return
+        const ports = isSet ? this.inputs : this.outputs
+        const p = (ports || []).find((x) => x.name === 'value')
+        if (!p || p.type === t) return
+        p.type = t
+        this._dropIncompatibleVarLinks()   // 类型变了，断开不兼容的旧连线
+        this.setDirtyCanvas && this.setDirtyCanvas(true, true)
+      }
+      this._dropIncompatibleVarLinks = () => {
+        const g = this.graph
+        if (!g) return
+        const t = this.properties.type
+        if (isSet) {
+          const slot = this.findInputSlot('value')
+          const link = slot >= 0 ? this.inputs[slot].link : null
+          if (link == null) return
+          const li = g.links[link]
+          const srcType = g.getNodeById(li.origin_id)?.outputs?.[li.origin_slot]?.type
+          if (!compatible(srcType, t)) this.disconnectInput(slot)
+        } else {
+          const slot = this.findOutputSlot('value')
+          const links = slot >= 0 ? (this.outputs[slot].links || []).slice() : []
+          for (const link of links) {
+            const li = g.links[link]
+            const dst = g.getNodeById(li.target_id)
+            const dstType = dst?.inputs?.[li.target_slot]?.type
+            if (!compatible(t, dstType)) this.disconnectOutput(slot, dst)
+          }
+        }
+      }
+      this.onPropertyChanged = function (name) { if (name === 'type') this._applyVarType() }
+      this._applyVarType()
+    }
     // 脚本节点：嵌多行代码编辑器（CodeOverlay 渲染），预留较大尺寸
     if (spec.type === 'script/python') this._showCode = true
     this.size = this.computeSize()
@@ -99,22 +155,6 @@ function registerOne(spec) {
   }
   // 运行错误：_error 由运行状态设置，由 ErrorOverlay 以可选中/可复制的 DOM 显示
   LiteGraph.registerNodeType(spec.type, NodeClass)
-}
-
-// 给 pack/unpack 节点加「+字段 / -字段」按钮，动态增减命名端口（端口名即 Bundle 字段名）
-function addFieldButtons(node, side) {
-  node.addWidget('button', '+ 字段', null, () => {
-    const name = prompt('字段名（Bundle 键）')
-    if (!name) return
-    if (side === 'input') node.addInput(name, ANY)
-    else node.addOutput(name, ANY)
-    node.setDirtyCanvas(true, true)
-  })
-  node.addWidget('button', '- 字段', null, () => {
-    if (side === 'input' && node.inputs.length > 0) node.removeInput(node.inputs.length - 1)
-    else if (side === 'output' && node.outputs.length > 0) node.removeOutput(node.outputs.length - 1)
-    node.setDirtyCanvas(true, true)
-  })
 }
 
 // 密码属性：自定义 widget。真实值存 properties[name]（options.property 保证刷新回显）；

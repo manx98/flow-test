@@ -261,32 +261,6 @@ def _eval_var_get(ctx, node):
     return {"value": ctx.vars.get(ctx.graph.prop(node, "name", "v"))}
 
 
-@handler("bundle/pack", "eval")
-def _eval_pack(ctx, node):
-    # 动态：按节点实际输入端口名打包（前端可增减字段）
-    bundle = {}
-    for slot in node.get("inputs") or []:
-        name = slot.get("name")
-        if not name:
-            continue
-        v = ctx.get_input(node, name)
-        if v is not None:
-            bundle[name] = v
-    return {"bundle": bundle}
-
-
-@handler("bundle/unpack", "eval")
-def _eval_unpack(ctx, node):
-    # 动态：按节点实际输出端口名拆包
-    b = ctx.get_input(node, "bundle") or {}
-    out = {}
-    for slot in node.get("outputs") or []:
-        name = slot.get("name")
-        if name:
-            out[name] = b.get(name)
-    return out
-
-
 # ---- 控制流（run）----
 @handler("flow/start", "run")
 def _run_start(ctx, node):
@@ -527,7 +501,12 @@ def _run_result(ctx, node):
 # ---- 变量/脚本/日志 ----
 @handler("var/set", "run")
 def _run_var_set(ctx, node):
-    ctx.vars[ctx.graph.prop(node, "name", "v")] = ctx.get_input(node, "value")
+    # 动态端口：每个数据输入端口名 = 变量名，一次可设多个
+    for inp in node.get("inputs") or []:
+        nm = inp.get("name")
+        if not nm or inp.get("type") == "exec":
+            continue
+        ctx.vars[nm] = ctx.get_input(node, nm)
     return "out"
 
 
