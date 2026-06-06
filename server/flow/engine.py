@@ -256,6 +256,11 @@ def _eval_number(ctx, node):
     return {"number": ctx.graph.prop(node, "value", 0)}
 
 
+@handler("const/bool", "eval")
+def _eval_bool(ctx, node):
+    return {"bool": bool(ctx.graph.prop(node, "value", False))}
+
+
 @handler("var/get", "eval")
 def _eval_var_get(ctx, node):
     return {"value": ctx.vars.get(ctx.graph.prop(node, "name", "v"))}

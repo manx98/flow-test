@@ -48,6 +48,11 @@ def _pr(name, ptype, default=None, desc="", **extra):
     return {"name": name, "type": ptype, "default": default, "desc": desc, **extra}
 
 
+def _note():
+    """常量节点的备注属性：仅供标注用途，不参与运行。"""
+    return _pr("备注", "string", "", "备注：说明此常量的用途（仅展示，不参与运行）")
+
+
 # 设备节点共享的输入/输出（仅属性不同）
 def _device_inputs():
     return [_exec_in(),
@@ -291,22 +296,26 @@ _NODES = [
      "description": "提供一张模板图片。通过「📁 上传图片 / 📋 粘贴图片」选图并命名，节点上回显，文件名可点击复制 / ✎ 重命名。",
      "script": "image(name)",
      "inputs": [], "outputs": [_p("picture", T.PICTURE, "*", desc="模板图片，连到找图/等待的 template")],
-     "properties": [_pr("name", "image", "", "图片文件名（images/ 下，由上传/粘贴写入）")], "widget": "image"},
+     "properties": [_pr("name", "image", "", "图片文件名（images/ 下，由上传/粘贴写入）"), _note()], "widget": "image"},
     {"type": "const/text", "category": "数据", "title": "文本常量",
      "description": "提供一个固定文本值。",
      "inputs": [], "outputs": [_p("text", T.TEXT, "*", desc="文本值")],
-     "properties": [_pr("value", "string", "", "文本内容")]},
+     "properties": [_pr("value", "string", "", "文本内容"), _note()]},
     {"type": "const/number", "category": "数据", "title": "数值常量",
      "description": "提供一个固定数值。",
      "inputs": [], "outputs": [_p("number", T.NUMBER, "*", desc="数值")],
-     "properties": [_pr("value", "number", 0, "数值内容")]},
+     "properties": [_pr("value", "number", 0, "数值内容"), _note()]},
+    {"type": "const/bool", "category": "数据", "title": "布尔常量",
+     "description": "提供一个固定布尔值（true/false）。",
+     "inputs": [], "outputs": [_p("bool", T.BOOL, "*", desc="布尔值")],
+     "properties": [_pr("value", "bool", False, "布尔内容（开=true）"), _note()]},
     {"type": "const/point", "category": "数据", "title": "坐标常量",
      "description": "提供一个固定坐标点，直接供动作使用。接了 x/y 输入则用输入值，否则用属性默认值。",
      "inputs": [_p("x", T.NUMBER, "1", desc="X 坐标（可选，接了用输入值）"),
                 _p("y", T.NUMBER, "1", desc="Y 坐标（可选，接了用输入值）")],
      "outputs": [_p("point", T.POINT, "*", desc="点坐标，供动作 target 使用")],
      "properties": [_pr("x", "int", 0, "X 坐标默认值"),
-                    _pr("y", "int", 0, "Y 坐标默认值")]},
+                    _pr("y", "int", 0, "Y 坐标默认值"), _note()]},
 
     # ===== 变量（value 连接点类型可自定义，前端随 type 属性切换）=====
     {"type": "var/set", "category": "数据", "title": "设变量",
