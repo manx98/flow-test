@@ -1,10 +1,27 @@
 // 脚本节点：节点画面区嵌「透明 textarea + 底层高亮 <pre>」做多行编辑 + 语法高亮 + 补全。
 import { LiteGraph } from 'litegraph.js'
+import { api } from '../api.js'
 import { attachCompletion } from './code-complete.js'
 import { highlightPython } from './code-highlight.js'
 
 const LH = 1.4          // 行高（pre 与 textarea 必须一致才能对齐）
 const RESIZE_PAD = 12   // 底部留白(节点单位)，露出 LiteGraph 右下角原生缩放手柄
+
+// 等宽字体单字符宽度 = 比例 × 字号(px)；测一次缓存（用于按列精确定位错误标注）
+let _charRatio = 0
+function charWidthRatio() {
+  if (_charRatio) return _charRatio
+  const s = document.createElement('span')
+  Object.assign(s.style, {
+    position: 'fixed', visibility: 'hidden', whiteSpace: 'pre',
+    fontFamily: 'monospace', fontSize: '100px',
+  })
+  s.textContent = '0'.repeat(50)
+  document.body.appendChild(s)
+  _charRatio = s.offsetWidth / 50 / 100
+  s.remove()
+  return _charRatio
+}
 
 export class CodeOverlay {
   constructor(lgcanvas, container) {
@@ -45,6 +62,64 @@ export class CodeOverlay {
     ta.addEventListener('input', commit)
     ta.addEventListener('scroll', () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft })
     const destroyCompletion = attachCompletion(ta, commit)
+
+    // 语法错误条：编辑器内按行号定位的高亮带（波浪底线），随 textarea 滚动/缩放在 _place 中定位
+    const strip = document.createElement('div')
+    Object.assign(strip.style, {
+      position: 'absolute', display: 'none', pointerEvents: 'none', boxSizing: 'border-box',
+      background: 'rgba(255,70,70,0.22)', borderBottom: '2px solid rgba(255,70,70,0.95)',
+    })
+    box.appendChild(strip)
+    // 错误消息 tooltip：悬停错误行时显示（textarea 在最上层，靠 mousemove 算行号触发）
+    const tip = document.createElement('div')
+    Object.assign(tip.style, {
+      position: 'fixed', zIndex: 1001, display: 'none', maxWidth: '360px', pointerEvents: 'none',
+      background: '#3a1d1d', color: '#ffd7d7', border: '1px solid #a55', borderRadius: '4px',
+      padding: '3px 7px', font: '12px monospace', boxShadow: '0 4px 12px rgba(0,0,0,.5)',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+    })
+    document.body.appendChild(tip)
+    const hideTip = () => { tip.style.display = 'none' }
+
+    // 语法检查：停止输入 ~500ms 后查一次；失焦再查一次（最终态）。过期响应用 seq 丢弃。
+    let checkTimer = null, checkSeq = 0
+    const runCheck = async () => {
+      const seq = ++checkSeq
+      try {
+        const errs = await api.check(ta.value)
+        if (seq !== checkSeq) return                  // 已有更新的检查，丢弃过期结果
+        node._syntaxError = (errs && errs[0]) || null
+      } catch (_) { return }                          // 网络失败：保留上次状态
+      hideTip()   // 错误已变化/已修复：先收起旧悬浮框，避免显示过期消息（下次悬停会按新状态重算）
+      node.setDirtyCanvas && node.setDirtyCanvas(true, true)   // 触发重绘以更新错误条位置
+    }
+    const scheduleCheck = () => { clearTimeout(checkTimer); hideTip(); checkTimer = setTimeout(runCheck, 500) }
+    ta.addEventListener('input', scheduleCheck)
+    ta.addEventListener('blur', () => { clearTimeout(checkTimer); runCheck() })
+    runCheck()                                        // 挂载即查一次（打开工程时坏脚本立刻显形）
+
+    // 悬停错误行 → 显示消息 tooltip
+    const onMove = (ev) => {
+      const err = node._syntaxError
+      if (!err) { tip.style.display = 'none'; return }
+      const cs = getComputedStyle(ta)
+      const fs = parseFloat(cs.fontSize) || 12
+      const lh = fs * LH, padTop = parseFloat(cs.paddingTop) || 0
+      const line = Math.floor((ev.offsetY + ta.scrollTop - padTop) / lh) + 1
+      if (line === err.line) {
+        tip.textContent = '语法错误：' + err.message
+        tip.style.left = (ev.clientX + 12) + 'px'
+        tip.style.top = (ev.clientY + 16) + 'px'
+        tip.style.display = 'block'
+      } else {
+        tip.style.display = 'none'
+      }
+    }
+    ta.addEventListener('mousemove', onMove)
+    ta.addEventListener('mouseleave', hideTip)
+    ta.addEventListener('scroll', hideTip)
+    const destroyCheck = () => { clearTimeout(checkTimer); try { tip.remove() } catch (_) {} }
+
     // 不让事件冒泡到画布（避免拖动/删除/缩放/框选）
     for (const ev of ['wheel', 'keydown', 'contextmenu'])
       ta.addEventListener(ev, (x) => x.stopPropagation())
@@ -68,7 +143,7 @@ export class CodeOverlay {
     box.appendChild(pre)
     box.appendChild(ta)
     this.container.appendChild(box)
-    e = { box, pre, ta, destroyCompletion }
+    e = { box, pre, ta, strip, destroyCompletion, destroyCheck }
     this.entries.set(node, e)
     sync()
     return e
@@ -79,6 +154,7 @@ export class CodeOverlay {
     if (!e) return
     this.entries.delete(node)
     try { e.destroyCompletion && e.destroyCompletion() } catch (_) {}
+    try { e.destroyCheck && e.destroyCheck() } catch (_) {}
     try { e.box.remove() } catch (_) {}
   }
 
@@ -121,6 +197,25 @@ export class CodeOverlay {
     if (document.activeElement !== e.ta && e.ta.value !== code) {
       e.ta.value = code
       e.pre.innerHTML = highlightPython(code)
+    }
+    // 语法错误标注：仅高亮出错的「列范围」(err.col..end_col)，跟随字号缩放与 textarea 滚动；
+    // box 已 overflow:hidden 自动裁切。跨行错误则标到该行末尾(整条编辑器宽)。
+    const err = node._syntaxError
+    if (err) {
+      const lhPx = 12 * scale * LH, pad = 4 * scale
+      const cw = charWidthRatio() * 12 * scale
+      const sameLine = (err.end_line || err.line) === err.line
+      const left = pad + (err.col - 1) * cw - e.ta.scrollLeft
+      const width = sameLine
+        ? Math.max(cw, (err.end_col - err.col) * cw)
+        : Math.max(cw, e.box.clientWidth - left)
+      e.strip.style.left = left + 'px'
+      e.strip.style.width = width + 'px'
+      e.strip.style.top = (pad + (err.line - 1) * lhPx - e.ta.scrollTop) + 'px'
+      e.strip.style.height = lhPx + 'px'
+      e.strip.style.display = 'block'
+    } else {
+      e.strip.style.display = 'none'
     }
   }
 }

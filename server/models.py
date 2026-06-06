@@ -27,3 +27,7 @@ class CompleteReq(BaseModel):
     code: str
     line: int       # 1 基（用户代码内）
     column: int     # 0 基
+
+
+class CheckReq(BaseModel):
+    code: str       # 待检查的脚本代码

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import CompleteReq, CreateProject, FlowGraph, Meta, RenameImage
+from .models import CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage
 from .project import Project, list_projects
 
 app = FastAPI(title="flow-test 测试工作流服务端")
@@ -194,6 +194,14 @@ async def api_complete(body: CompleteReq):
             return {"completions": comps}
         except ImportError:
             raise HTTPException(503, "代码补全需要 jedi：pip install jedi")
+
+
+# ======================= 脚本语法检查（compile）=======================
+@app.post("/api/check")
+def api_check(body: CheckReq):
+    # compile() 是微秒级，直接同步即可，无需补全那套串行/去抖机制
+    from .check import check_syntax
+    return {"errors": check_syntax(body.code)}
 
 
 # ======================= 节点目录（前端建面板用）=======================

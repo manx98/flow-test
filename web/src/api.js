@@ -13,6 +13,8 @@ export const api = {
   catalog: () => req('/api/nodes'),
   complete: (code, line, column) =>
     req('/api/complete', { method: 'POST', headers: J, body: JSON.stringify({ code, line, column }) }).then(d => d.completions),
+  check: (code) =>
+    req('/api/check', { method: 'POST', headers: J, body: JSON.stringify({ code }) }).then(d => d.errors),
   // 工程
   listProjects: () => req('/api/projects').then(d => d.projects),
   createProject: (name) => req('/api/projects', { method: 'POST', headers: J, body: JSON.stringify({ name }) }),
