@@ -316,8 +316,9 @@ def _run_delay(ctx, node):
 def _run_wait_appear(ctx, node):
     dev = _need_dev_in(ctx, node)
     tmpl = ctx.get_input(node, "template")
+    mask = ctx.get_input(node, "mask")   # 可选遮罩（255 参与/0 忽略）
     timeout = float(ctx.graph.prop(node, "timeout", 10))
-    m = dev.exists(Pattern(tmpl), timeout=timeout)
+    m = dev.exists(Pattern(tmpl, mask=mask), timeout=timeout)
     ctx.set_output(node, "match", m)
     return "out" if m is not None else "timeout"
 
@@ -326,8 +327,9 @@ def _run_wait_appear(ctx, node):
 def _run_wait_vanish(ctx, node):
     dev = _need_dev_in(ctx, node)
     tmpl = ctx.get_input(node, "template")
+    mask = ctx.get_input(node, "mask")   # 可选遮罩（255 参与/0 忽略）
     timeout = float(ctx.graph.prop(node, "timeout", 10))
-    gone = dev.wait_vanish(Pattern(tmpl), timeout=timeout)
+    gone = dev.wait_vanish(Pattern(tmpl, mask=mask), timeout=timeout)
     return "out" if gone else "timeout"
 
 
@@ -580,13 +582,13 @@ class ScriptDevice:
         """找全部（等价「找全部」）：返回 Match 列表。"""
         return self._dev.find_all(self._pattern(template, similarity))
 
-    def wait_appear(self, template, timeout=10):
-        """等出现（等价「等出现」）：出现返回 Match，超时 None。"""
-        return self._dev.exists(self._pattern(template), timeout=timeout)
+    def wait_appear(self, template, timeout=10, mask=None):
+        """等出现（等价「等出现」）：出现返回 Match，超时 None。可选 mask 忽略部分区域。"""
+        return self._dev.exists(self._pattern(template, mask=mask), timeout=timeout)
 
-    def wait_vanish(self, template, timeout=10):
-        """等消失（等价「等消失」）：消失 True，超时 False。"""
-        return self._dev.wait_vanish(self._pattern(template), timeout=timeout)
+    def wait_vanish(self, template, timeout=10, mask=None):
+        """等消失（等价「等消失」）：消失 True，超时 False。可选 mask 忽略部分区域。"""
+        return self._dev.wait_vanish(self._pattern(template, mask=mask), timeout=timeout)
 
     def click(self, target, button="left", double=False):
         """点击（等价「点击」）。target 可为 Location/Match/点。"""
