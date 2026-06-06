@@ -2,7 +2,7 @@
 import { LiteGraph, LGraphCanvas } from 'litegraph.js'
 import { showNodeHelp } from './help-dialog.js'
 
-const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any'
+const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any', DEVICE = 'device'
 
 // 类型兼容（与服务端 flow/types.py 一致）
 function compatible(src, dst) {
@@ -49,8 +49,8 @@ function registerOne(spec) {
       addWidgetFor(this, prop)
     }
     this._spec = spec
-    // 设备节点：仅连接/断开按钮（不内嵌画面、不接管控制——交给「人机交互」节点）
-    if (spec.category === '设备') {
+    // 设备源节点（输出 device 句柄）：仅连接/断开按钮。「设备属性」无 device 输出 → 不加按钮
+    if ((spec.outputs || []).some((o) => o.type === DEVICE)) {
       this.addWidget('button', '▶ 连接 / 断开', null, () => {
         deviceActionHandler && deviceActionHandler(this)
       })
@@ -160,8 +160,28 @@ function registerOne(spec) {
       this.onPropertyChanged = function (name) { if (name === 'type') this._applyVarType() }
       this._applyVarType()
     }
-    // 脚本节点：嵌多行代码编辑器（CodeOverlay 渲染），预留较大尺寸
-    if (spec.type === 'script/python') this._showCode = true
+    // 脚本节点：动态增减命名 device 输入（每口名=脚本里的设备名），并嵌多行代码编辑器
+    if (spec.type === 'script/python') {
+      this.addWidget('button', '+ 设备', null, () => {
+        const name = (prompt('设备名（脚本里用，需合法标识符才注入同名变量）') || '').trim()
+        if (!name) return
+        if ((this.inputs || []).some((i) => i.name === name)) { alert('名称重复'); return }
+        this.addInput(name, DEVICE)
+        this.setDirtyCanvas(true, true)
+      })
+      this.addWidget('button', '- 设备', null, (w, canvas, node, pos, event) => {
+        const names = (this.inputs || []).filter((i) => i.type === DEVICE).map((i) => i.name)
+        if (!names.length) return
+        new LiteGraph.ContextMenu(names, {
+          event, title: '删除设备',
+          callback: (name) => {
+            const slot = this.findInputSlot(name)
+            if (slot >= 0) { this.removeInput(slot); this.setDirtyCanvas(true, true) }
+          },
+        })
+      })
+      this._showCode = true
+    }
     this.size = this.computeSize()
     if (this._showVideo || this._showShot) this.size[1] = Math.max(this.size[1], 220)
     if (this._showCode) { this.size[0] = Math.max(this.size[0], 300); this.size[1] = Math.max(this.size[1], 200) }

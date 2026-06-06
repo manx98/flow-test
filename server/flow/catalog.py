@@ -26,7 +26,7 @@ def _engine_title(name: str, pkg: str) -> str:
 
 
 # 变量 value 端口可选类型（自定义连接点类型）
-_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR]
+_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE]
 
 
 def _p(name, ptype, card="1", required=False, desc=""):
@@ -53,18 +53,14 @@ def _note():
     return _pr("备注", "string", "", "备注：说明此常量的用途（仅展示，不参与运行）")
 
 
-# 设备节点共享的输入/输出（仅属性不同）
+# 设备节点：纯数据源，只输出一个 device 句柄（仅属性不同）
 def _device_inputs():
-    return [_exec_in(),
-            _p("mouse", T.MOUSE, "*", desc="鼠标控制：接「点击/滚动/拖拽」等动作的 mouse 输出，由本设备执行"),
-            _p("keyboard", T.KEYBOARD, "*", desc="键盘控制：接「输入文本」等动作的 keyboard 输出，由本设备执行")]
+    return []
 
 
 def _device_outputs():
-    return [_exec_out(),
-            _p("video", T.VIDEO, "*", desc="设备实时画面：连「人机交互」显示，或连「找图/找文字/等待」作查找源"),
-            _p("width", T.NUMBER, "*", desc="屏幕宽度（像素）；被拉取时会连接设备"),
-            _p("height", T.NUMBER, "*", desc="屏幕高度（像素）；被拉取时会连接设备")]
+    return [_p("device", T.DEVICE, "*",
+               desc="设备句柄：连「设备属性」取出 video/mouse/keyboard 等能力，或直接连「人机交互」「脚本」")]
 
 
 # Python 脚本节点注入的内置函数(等价各组件)与对象，供「组件说明」详细展示
@@ -72,21 +68,23 @@ def _fn(sig, desc):
     return {"sig": sig, "desc": desc}
 
 
+# 设备句柄方法（绑定到某台设备，用「设备.方法()」调用）
 _SCRIPT_FUNCS = [
+    _fn("设备.find_image(template, similarity=0.7, mask=None, timeout=0)",
+        "找图：命中返回 Match，否则 None（等价「找图」）"),
+    _fn("设备.find_text(text, regex=False, ocr=None, timeout=0)",
+        "找文字(OCR)：命中返回 Match，否则 None（等价「找文字」）"),
+    _fn("设备.find_all(template, similarity=0.7)", "找全部：返回所有命中的 Match 列表（等价「找全部」）"),
+    _fn("设备.wait_appear(template, timeout=10)", "等出现：出现返回 Match，超时 None（等价「等出现」）"),
+    _fn("设备.wait_vanish(template, timeout=10)", "等消失：消失 True，超时 False（等价「等消失」）"),
+    _fn("设备.click(target, button='left', double=False)", "在点坐标点击；target 可为 Location/Match（等价「点击」）"),
+    _fn("设备.type_text(text, paste=False)", "输入文本；paste=True 走剪贴板粘贴（等价「输入文本」）"),
+    _fn("设备.scroll(target, dy=-1)", "在点坐标滚动滚轮（等价「滚动」）"),
+    _fn("设备.drag(src, dst)", "从 src 点拖拽到 dst 点（等价「拖拽」）"),
+    _fn("设备.raw", "拿到原始 visauto Device（dev.find/dev.mouse 等底层 API）"),
+    # 设备无关的全局函数
     _fn("image(name)", "按文件名加载模板图片（等价「模板图片」）"),
-    _fn("find_image(template, similarity=0.7, mask=None, timeout=0)",
-        "找图：在画面找模板，命中返回 Match，否则 None（等价「找图」）"),
-    _fn("find_text(text, regex=False, ocr=None, timeout=0)",
-        "找文字(OCR)：命中返回 Match，否则 None；ocr 缺省用会话默认引擎（等价「找文字」）"),
-    _fn("find_all(template, similarity=0.7)", "找全部：返回所有命中的 Match 列表（等价「找全部」）"),
-    _fn("wait_appear(template, timeout=10)", "等出现：出现返回 Match，超时返回 None（等价「等出现」）"),
-    _fn("wait_vanish(template, timeout=10)", "等消失：消失返回 True，超时返回 False（等价「等消失」）"),
-    _fn("to_point(match, anchor='center', dx=0, dy=0)",
-        "Match→坐标点；anchor=center/top-left/…，再加偏移（等价「坐标转换」）"),
-    _fn("click(target, button='left', double=False)", "在点坐标点击；target 可为 Location/Match（等价「点击」）"),
-    _fn("type_text(text, paste=False)", "输入文本；paste=True 走剪贴板粘贴（等价「输入文本」）"),
-    _fn("scroll(target, dy=-1)", "在点坐标滚动滚轮（等价「滚动」）"),
-    _fn("drag(src, dst)", "从 src 点拖拽到 dst 点（等价「拖拽」）"),
+    _fn("to_point(match, anchor='center', dx=0, dy=0)", "Match→坐标点，再加偏移（等价「坐标转换」）"),
     _fn("delay(seconds=1.0)", "延时若干秒，可被中止（等价「延时」）"),
     _fn("log(value, label='')", "把值写入运行日志（等价「日志」）"),
     _fn("alert(message, level='info')", "弹出非阻塞提示，level=info/warn/error（等价「提示」）"),
@@ -95,11 +93,10 @@ _SCRIPT_FUNCS = [
 ]
 
 _SCRIPT_INJECTS = [
-    {"name": "dev", "desc": "默认设备(visauto Device/Region)；可直接 dev.find / dev.click / dev.capture 等"},
+    {"name": "devs", "desc": "设备字典：devs['名'] 取设备句柄；每个 device 输入口名(『+ 设备』添加)若是合法标识符也注入同名变量"},
     {"name": "visauto", "desc": "visauto 模块（Image / Pattern / Location / Region / Match / Key 等）"},
     {"name": "Pattern", "desc": "模板匹配类：Pattern(img, similarity=…, mask=…)"},
     {"name": "vars", "desc": "flow 变量字典（与 get_var/set_var 同一份）"},
-    {"name": "flow", "desc": "上述内置函数所在对象，亦可 flow.find_image(...) 这样调用"},
 ]
 
 
@@ -149,12 +146,24 @@ _NODES = [
                     _pr("vm", "string", "", "目标虚拟机（名称或 MoID）"),
                     _pr("verify_tls", "bool", False, "是否校验 TLS 证书")]},
 
+    # ===== 设备属性（把 device 句柄拆成各能力端口）=====
+    {"type": "device/attrs", "category": "设备", "title": "设备属性",
+     "description": "把设备句柄拆成各项能力：video(画面)、mouse/keyboard(控制)、width/height(屏幕宽高)。"
+                    "video 连到「找图/找文字/等待」；mouse/keyboard 连到「点击/输入文本」等动作。",
+     "inputs": [_p("device", T.DEVICE, "1", True, desc="上游设备句柄")],
+     "outputs": [_p("video", T.VIDEO, "*", desc="设备实时画面：连「找图/找文字/等待」作查找源"),
+                 _p("mouse", T.MOUSE, "*", desc="鼠标控制：连「点击/滚动/拖拽」的 mouse 输入"),
+                 _p("keyboard", T.KEYBOARD, "*", desc="键盘控制：连「输入文本」的 keyboard 输入"),
+                 _p("width", T.NUMBER, "*", desc="屏幕宽度（像素）"),
+                 _p("height", T.NUMBER, "*", desc="屏幕高度（像素）")],
+     "properties": []},
+
     # ===== 交互/显示 =====
     {"type": "io/interaction", "category": "交互", "title": "人机交互",
-     "description": "在节点内显示上游设备的实时画面，鼠标移入即把鼠标/键盘转发回设备；可点「📷 截图」抓帧裁剪并自动生成模板图片节点。",
-     "inputs": [_p("video", T.VIDEO, "1", desc="要显示并交互的设备画面")],
-     "outputs": [_p("mouse", T.MOUSE, "*", desc="转发的鼠标控制（回连设备 mouse 输入）"),
-                 _p("keyboard", T.KEYBOARD, "*", desc="转发的键盘控制（回连设备 keyboard 输入）")],
+     "description": "接一个设备句柄：在节点内显示该设备实时画面，鼠标移入即把鼠标/键盘转发回设备；"
+                    "可点「📷 截图」抓帧裁剪并自动生成模板图片节点。",
+     "inputs": [_p("device", T.DEVICE, "1", True, desc="要显示并交互的设备")],
+     "outputs": [],
      "properties": [], "widget": "video"},
 
     # ===== 采集 =====
@@ -240,32 +249,36 @@ _NODES = [
 
     # ===== 动作（入参为点坐标 Point）=====
     {"type": "action/click", "category": "动作", "title": "点击",
-     "description": "在给定点坐标点击。mouse 输出需回连设备的 mouse 输入以解析目标设备。",
+     "description": "在给定点坐标点击。mouse 输入来自「设备属性」，决定在哪台设备上点击。",
      "script": "click(target, button='left', double=False)",
-     "inputs": [_exec_in(), _p("target", T.POINT, "1", desc="点击位置（点坐标）")],
-     "outputs": [_exec_out(), _p("mouse", T.MOUSE, "*", desc="鼠标控制，回连设备 mouse 输入")],
+     "inputs": [_exec_in(), _p("target", T.POINT, "1", desc="点击位置（点坐标）"),
+                _p("mouse", T.MOUSE, "1", True, desc="目标设备的鼠标能力（来自「设备属性」）")],
+     "outputs": [_exec_out()],
      "properties": [_pr("button", "enum", "left", "鼠标按键",
                         options=["left", "right", "middle"]),
                     _pr("double", "bool", False, "是否双击")]},
     {"type": "action/type", "category": "动作", "title": "输入文本",
-     "description": "在当前焦点处输入文本。keyboard 输出需回连设备的 keyboard 输入。",
+     "description": "在当前焦点处输入文本。keyboard 输入来自「设备属性」，决定在哪台设备上输入。",
      "script": "type_text(text, paste=False)",
-     "inputs": [_exec_in(), _p("text", T.TEXT, "1", desc="要输入的文本")],
-     "outputs": [_exec_out(), _p("keyboard", T.KEYBOARD, "*", desc="键盘控制，回连设备 keyboard 输入")],
+     "inputs": [_exec_in(), _p("text", T.TEXT, "1", desc="要输入的文本"),
+                _p("keyboard", T.KEYBOARD, "1", True, desc="目标设备的键盘能力（来自「设备属性」）")],
+     "outputs": [_exec_out()],
      "properties": [_pr("paste", "bool", False, "走剪贴板粘贴（适合长文本/中文）")]},
     {"type": "action/scroll", "category": "动作", "title": "滚动",
-     "description": "在给定点坐标处滚动鼠标滚轮。mouse 输出需回连设备 mouse 输入。",
+     "description": "在给定点坐标处滚动鼠标滚轮。mouse 输入来自「设备属性」。",
      "script": "scroll(target, dy=-1)",
-     "inputs": [_exec_in(), _p("target", T.POINT, "1", desc="滚动位置（点坐标）")],
-     "outputs": [_exec_out(), _p("mouse", T.MOUSE, "*", desc="鼠标控制，回连设备 mouse 输入")],
+     "inputs": [_exec_in(), _p("target", T.POINT, "1", desc="滚动位置（点坐标）"),
+                _p("mouse", T.MOUSE, "1", True, desc="目标设备的鼠标能力（来自「设备属性」）")],
+     "outputs": [_exec_out()],
      "properties": [_pr("dy", "int", -1, "滚动量（负=向下，正=向上）")]},
     {"type": "action/drag", "category": "动作", "title": "拖拽",
-     "description": "从起点拖到终点。mouse 输出需回连设备 mouse 输入。",
+     "description": "从起点拖到终点。mouse 输入来自「设备属性」。",
      "script": "drag(src, dst)",
      "inputs": [_exec_in(),
                 _p("src", T.POINT, "1", desc="拖拽起点"),
-                _p("dst", T.POINT, "1", desc="拖拽终点")],
-     "outputs": [_exec_out(), _p("mouse", T.MOUSE, "*", desc="鼠标控制，回连设备 mouse 输入")],
+                _p("dst", T.POINT, "1", desc="拖拽终点"),
+                _p("mouse", T.MOUSE, "1", True, desc="目标设备的鼠标能力（来自「设备属性」）")],
+     "outputs": [_exec_out()],
      "properties": []},
 
     # ===== 等待 =====
@@ -368,14 +381,15 @@ _NODES = [
 
     # ===== 脚本/日志 =====
     {"type": "script/python", "category": "脚本", "title": "Python 脚本",
-     "description": "在节点内多行编辑器写 Python（语法高亮 + jedi 补全 + 语法检查）。已注入默认设备与等价各组件的"
-                    "内置函数，详见下方「注入对象」与「内置函数」。",
+     "description": "在节点内多行编辑器写 Python（语法高亮 + jedi 补全 + 语法检查）。用「+ 设备」加 device 输入口，"
+                    "每口名=脚本里的设备名(同名句柄, 亦在 devs[名])；设备句柄带 find_image/click/… 方法，详见下方「内置函数」。",
      "functions": _SCRIPT_FUNCS,
      "injects": _SCRIPT_INJECTS,
      "inputs": [_exec_in()],
      "outputs": [_exec_out()],
      "properties": [_pr("code", "code",
-                        "# m = find_image('btn.png')\n# if m:\n#     click(to_point(m))\n",
+                        "# pc = devs['pc']  # 或直接用同名变量 pc\n"
+                        "# m = pc.find_image('btn.png')\n# if m:\n#     pc.click(to_point(m))\n",
                         "Python 代码（节点内编辑器）")],
      "widget": "code"},
     {"type": "util/log", "category": "脚本", "title": "日志",

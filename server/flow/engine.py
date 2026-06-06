@@ -79,30 +79,15 @@ class RunContext:
             self.devices[nid] = self.device_provider(device_node)
         return self.devices[nid]
 
-    def device_from_input(self, node, slot="video"):
-        src = self.graph.input_source(node, slot)
-        if not src:
-            return None
-        src_node, _ = src
-        t = src_node["type"]
-        if t.startswith("device/"):
-            return self.get_device(src_node)
-        return None
-
-    def device_from_output(self, node, slot):
-        for tnode, _ in self.graph.output_targets(node, slot):
-            if tnode["type"].startswith("device/"):
-                return self.get_device(tnode)
-        return None
-
-    def default_device(self):
-        return next(iter(self.devices.values()), None)
-
     def capture_evidence(self, node_id):
-        """抓当前帧作为失败证据；返回引用(URL/文件名)或 None。"""
+        """抓当前帧作为失败证据；返回引用(URL/文件名)或 None。
+
+        设备解析已改为「值携带句柄」，断言节点本身不绑定设备，这里尽力而为：
+        取任一已连接的设备抓一帧（仅用于报告截图，非控制路径）。
+        """
         if self.evidence_sink is None:
             return None
-        dev = self.default_device()
+        dev = next(iter(self.devices.values()), None)
         if dev is None:
             return None
         try:
@@ -126,6 +111,16 @@ class RunContext:
         if target is not None:
             self.run_chain_from(target)
 
+    def report_error(self, node_id, exc, evidence=None):
+        """在出错的源节点记录错误(报告+标红+消息)，并标记异常已上报，
+        使上层链路节点只标红、不重复展示同一条错误。"""
+        self.report.add_error(node_id, str(exc), evidence)
+        self.on_state(node_id, "fail", str(exc))
+        try:
+            exc._flow_reported = True
+        except Exception:
+            pass
+
     def _run_node(self, node):
         h = HANDLERS.get(node["type"])
         if not h or "run" not in h:
@@ -137,9 +132,10 @@ class RunContext:
         except ScriptAborted:
             raise
         except Exception as e:
-            ref = self.capture_evidence(node["id"])
-            self.report.add_error(node["id"], str(e), ref)
-            self.on_state(node["id"], "fail", str(e))
+            if getattr(e, "_flow_reported", False):
+                self.on_state(node["id"], "fail", "")   # 链路标红：错误已由触发节点展示，本层不重复
+            else:
+                self.report_error(node["id"], e, self.capture_evidence(node["id"]))
             raise
         # 自报状态的节点（断言/日志）不再补 ok，避免把 fail 覆盖掉
         if node["type"] not in _SELF_REPORT:
@@ -199,20 +195,23 @@ def _cleanup_owned(ctx: RunContext):
 
 
 # ======================= 节点处理器 =======================
-# ---- 设备（exec 经过时确保连接，再放行）----
-def _run_device(ctx, node):
-    ctx.get_device(node)   # 连接/复用设备
-    return "out"
-
-
+# ---- 设备：纯数据源，输出 device 句柄（被拉取时惰性连接/复用）----
 def _eval_device(ctx, node):
-    dev = ctx.get_device(node)   # 屏幕尺寸（按需连接设备）
-    return {"width": int(dev.w), "height": int(dev.h)}
+    return {"device": ctx.get_device(node)}
 
 
 for _dt in ("device/local", "device/novnc", "device/rdp", "device/pve", "device/vmware"):
-    HANDLERS.setdefault(_dt, {})["run"] = _run_device
-    HANDLERS[_dt]["eval"] = _eval_device
+    HANDLERS.setdefault(_dt, {})["eval"] = _eval_device
+
+
+# ---- 设备属性：把 device 句柄拆成各能力端口（video/mouse/keyboard 的值都=该设备）----
+@handler("device/attrs", "eval")
+def _eval_device_attrs(ctx, node):
+    dev = ctx.get_input(node, "device")
+    if dev is None:
+        return {}
+    return {"video": dev, "mouse": dev, "keyboard": dev,
+            "width": int(dev.w), "height": int(dev.h)}
 
 
 # ---- 纯数据（eval）----
@@ -263,7 +262,13 @@ def _eval_bool(ctx, node):
 
 @handler("var/get", "eval")
 def _eval_var_get(ctx, node):
-    return {"value": ctx.vars.get(ctx.graph.prop(node, "name", "v"))}
+    name = ctx.graph.prop(node, "name", "v")
+    if name not in ctx.vars:
+        # 变量未设置：错误归到取变量节点自身（标红+展示），上层拉取它的节点只标红
+        exc = RuntimeError(f"取变量失败：变量「{name}」未设置（请先用「设变量」对它赋值）")
+        ctx.report_error(node["id"], exc)
+        raise exc
+    return {"value": ctx.vars[name]}
 
 
 # ---- 控制流（run）----
@@ -429,17 +434,20 @@ def _eval_to_point(ctx, node):
 
 # ---- 动作（按点坐标执行；设备经 mouse 输出连线解析）----
 def _xy(p):
-    """点坐标取 (x, y)；兼容直接传入 Match/Region（取中心）。"""
+    """点坐标取 (x, y)；兼容 Match/Region（取中心）与 (x, y) 元组/列表（脚本里方便）。"""
     c = getattr(p, "center", None)
     if c is not None:
         return c.x, c.y
+    if isinstance(p, (tuple, list)) and len(p) >= 2:
+        return p[0], p[1]
     return p.x, p.y
 
 
 def _mouse_dev(ctx, node):
-    dev = ctx.device_from_output(node, "mouse") or ctx.default_device()
+    # mouse 输入的值即设备句柄（来自「设备属性」的 mouse 输出）
+    dev = ctx.get_input(node, "mouse")
     if dev is None:
-        raise RuntimeError("动作节点未连到设备(Mouse)")
+        raise RuntimeError("动作节点未连接设备(mouse)，请经「设备属性」接入")
     return dev
 
 
@@ -462,9 +470,9 @@ def _run_click(ctx, node):
 @handler("action/type", "run")
 def _run_type(ctx, node):
     text = ctx.get_input(node, "text") or ""
-    dev = ctx.device_from_output(node, "keyboard") or ctx.default_device()
+    dev = ctx.get_input(node, "keyboard")   # keyboard 输入的值即设备句柄
     if dev is None:
-        raise RuntimeError("输入节点未连到设备(Keyboard)")
+        raise RuntimeError("输入文本节点未连接设备(keyboard)，请经「设备属性」接入")
     if ctx.graph.prop(node, "paste", False):
         dev.paste(text)
     else:
@@ -544,27 +552,16 @@ def _run_alert(ctx, node):
     return "out"
 
 
-class ScriptAPI:
-    """脚本节点可用的「组件功能函数」：等价于各内置组件的运行逻辑，作用于默认设备。
+class ScriptDevice:
+    """脚本里的设备句柄：把各组件功能绑定到某一台设备，用「设备.方法()」调用。"""
 
-    注入到脚本命名空间（既可经 flow.xxx 调用，常用函数也直接以同名暴露）。
-    """
-
-    def __init__(self, ctx, node):
-        self._ctx = ctx
-        self._node = node
+    def __init__(self, dev):
+        self._dev = dev
 
     @property
-    def dev(self):
-        d = self._ctx.default_device()
-        if d is None:
-            raise RuntimeError("脚本节点未连到任何设备")
-        return d
-
-    @staticmethod
-    def image(name):
-        """按文件名加载模板图片（等价「模板图片」组件）。"""
-        return visauto.Image(name)
+    def raw(self):
+        """原始 visauto Device（dev.find / dev.mouse 等底层 API）。"""
+        return self._dev
 
     def _pattern(self, template, similarity=0.7, mask=None):
         if isinstance(template, Pattern):
@@ -572,118 +569,132 @@ class ScriptAPI:
         return Pattern(template, similarity=similarity, mask=mask)
 
     def find_image(self, template, similarity=0.7, mask=None, timeout=0):
-        """找图（等价「找图」组件）：命中返回 Match，否则 None。"""
-        return self.dev.exists(self._pattern(template, similarity, mask), timeout=timeout)
+        """找图（等价「找图」）：命中返回 Match，否则 None。"""
+        return self._dev.exists(self._pattern(template, similarity, mask), timeout=timeout)
 
     def find_text(self, text, regex=False, ocr=None, timeout=0):
-        """找文字（等价「找文字(OCR)」组件）：命中返回 Match，否则 None。"""
-        return self.dev.exists(text=text, regex=regex, ocr=ocr, timeout=timeout)
+        """找文字(OCR)（等价「找文字」）：命中返回 Match，否则 None。"""
+        return self._dev.exists(text=text, regex=regex, ocr=ocr, timeout=timeout)
 
     def find_all(self, template, similarity=0.7):
-        """找全部（等价「找全部」组件）：返回 Match 列表。"""
-        return self.dev.find_all(self._pattern(template, similarity))
+        """找全部（等价「找全部」）：返回 Match 列表。"""
+        return self._dev.find_all(self._pattern(template, similarity))
 
     def wait_appear(self, template, timeout=10):
-        """等出现（等价「等出现」组件）：出现返回 Match，超时返回 None。"""
-        return self.dev.exists(self._pattern(template), timeout=timeout)
+        """等出现（等价「等出现」）：出现返回 Match，超时 None。"""
+        return self._dev.exists(self._pattern(template), timeout=timeout)
 
     def wait_vanish(self, template, timeout=10):
-        """等消失（等价「等消失」组件）：消失返回 True，超时返回 False。"""
-        return self.dev.wait_vanish(self._pattern(template), timeout=timeout)
+        """等消失（等价「等消失」）：消失 True，超时 False。"""
+        return self._dev.wait_vanish(self._pattern(template), timeout=timeout)
+
+    def click(self, target, button="left", double=False):
+        """点击（等价「点击」）。target 可为 Location/Match/点。"""
+        x, y = _xy(target)
+        if double:
+            self._dev.mouse.double_click(x, y)
+        elif button == "right":
+            self._dev.mouse.right_click(x, y)
+        else:
+            self._dev.mouse.click(x, y)
+
+    def type_text(self, text, paste=False):
+        """输入文本（等价「输入文本」）。"""
+        if paste:
+            self._dev.paste(text)
+        else:
+            self._dev.type(text)
+
+    def scroll(self, target, dy=-1):
+        """滚动（等价「滚动」）。"""
+        x, y = _xy(target)
+        self._dev.mouse.scroll(x, y, 0, int(dy))
+
+    def drag(self, src, dst):
+        """拖拽（等价「拖拽」）：从 src 拖到 dst。"""
+        sx, sy = _xy(src)
+        dx, dy = _xy(dst)
+        self._dev.mouse.drag_drop(sx, sy, dx, dy)
+
+
+class ScriptGlobals:
+    """脚本里设备无关的全局函数。"""
+
+    def __init__(self, ctx, node):
+        self._ctx = ctx
+        self._node = node
+
+    @staticmethod
+    def image(name):
+        """按文件名加载模板图片（等价「模板图片」）。"""
+        return visauto.Image(name)
 
     @staticmethod
     def to_point(match, anchor="center", dx=0, dy=0):
-        """坐标转换（等价「坐标转换」组件）：Match → Location。"""
+        """坐标转换（等价「坐标转换」）：Match → Location。"""
         return _match_to_point(match, anchor, dx, dy)
 
-    def click(self, target, button="left", double=False):
-        """点击（等价「点击」组件）。target 可为 Location/Match/点。"""
-        x, y = _xy(target)
-        if double:
-            self.dev.mouse.double_click(x, y)
-        elif button == "right":
-            self.dev.mouse.right_click(x, y)
-        else:
-            self.dev.mouse.click(x, y)
-
-    def type_text(self, text, paste=False):
-        """输入文本（等价「输入文本」组件）。"""
-        if paste:
-            self.dev.paste(text)
-        else:
-            self.dev.type(text)
-
-    def scroll(self, target, dy=-1):
-        """滚动（等价「滚动」组件）。"""
-        x, y = _xy(target)
-        self.dev.mouse.scroll(x, y, 0, int(dy))
-
-    def drag(self, src, dst):
-        """拖拽（等价「拖拽」组件）：从 src 拖到 dst。"""
-        sx, sy = _xy(src)
-        dx, dy = _xy(dst)
-        self.dev.mouse.drag_drop(sx, sy, dx, dy)
-
     def delay(self, seconds=1.0):
-        """延时（等价「延时」组件）：可中止。"""
+        """延时（等价「延时」）：可中止。"""
         end = time.monotonic() + float(seconds)
         while time.monotonic() < end:
             check_abort()
             time.sleep(min(0.1, end - time.monotonic()))
 
     def log(self, value, label=""):
-        """日志（等价「日志」组件）：写入运行日志。"""
+        """日志（等价「日志」）：写入运行日志。"""
         self._ctx.report.log(f"{label}{value}" if label else str(value))
 
     def alert(self, message, level="info"):
-        """提示（等价「提示」组件）：弹出非阻塞提示。"""
+        """提示（等价「提示」）：弹出非阻塞提示。"""
         self._ctx.emit({"type": "alert", "id": self._node["id"],
                         "level": level, "message": str(message)})
         self._ctx.report.log(f"[提示] {message}")
 
     def get_var(self, name, default=None):
-        """取变量（等价「取变量」组件）。"""
+        """取变量（等价「取变量」）。"""
         return self._ctx.vars.get(name, default)
 
     def set_var(self, name, value):
-        """设变量（等价「设变量」组件）。"""
+        """设变量（等价「设变量」）。"""
         self._ctx.vars[name] = value
 
 
 @handler("script/python", "run")
 def _run_script(ctx, node):
     code = ctx.graph.prop(node, "code", "")
-    flow = ScriptAPI(ctx, node)
+    g = ScriptGlobals(ctx, node)
+    # 动态命名 device 输入：每个口名 → 设备句柄（devs[名]，合法标识符再注入同名变量）
+    devs: dict = {}
+    for slot in node.get("inputs") or []:
+        if slot.get("type") == "device":
+            d = ctx.get_input(node, slot.get("name"))
+            if d is not None:
+                devs[slot["name"]] = ScriptDevice(d)
     ns = {
         "visauto": visauto,
-        "dev": ctx.default_device(),
-        "vars": ctx.vars,
         "Pattern": Pattern,
-        "flow": flow,
-        # 组件功能函数：直接可用
-        "image": flow.image,
-        "find_image": flow.find_image,
-        "find_text": flow.find_text,
-        "find_all": flow.find_all,
-        "wait_appear": flow.wait_appear,
-        "wait_vanish": flow.wait_vanish,
-        "to_point": flow.to_point,
-        "click": flow.click,
-        "type_text": flow.type_text,
-        "scroll": flow.scroll,
-        "drag": flow.drag,
-        "delay": flow.delay,
-        "log": flow.log,
-        "alert": flow.alert,
-        "get_var": flow.get_var,
-        "set_var": flow.set_var,
+        "vars": ctx.vars,
+        "devs": devs,
+        # 设备无关的全局函数
+        "image": g.image,
+        "to_point": g.to_point,
+        "delay": g.delay,
+        "log": g.log,
+        "alert": g.alert,
+        "get_var": g.get_var,
+        "set_var": g.set_var,
     }
+    for name, sd in devs.items():
+        if name.isidentifier() and name not in ns:
+            ns[name] = sd
     exec(compile(code, "<script-node>", "exec"), ns)
     return "out"
 
 
 def _need_dev_in(ctx, node):
-    dev = ctx.device_from_input(node, "video")
+    # video 输入的值即设备句柄（来自「设备属性」的 video 输出）
+    dev = ctx.get_input(node, "video")
     if dev is None:
-        raise RuntimeError(f"节点 {node.get('type')} 未连到设备(Video)")
+        raise RuntimeError(f"节点 {node.get('type')} 未连接设备(video)，请经「设备属性」接入")
     return dev

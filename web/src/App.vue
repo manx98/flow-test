@@ -416,7 +416,8 @@ function setNodeStatus(id, st, info) {
   const n = graph.getNodeById(id)
   if (!n) return
   n.color = STATUS_COLOR[st] || null
-  if (st === 'fail') n._error = info || '运行出错'
+  // fail 有消息=触发节点(标红+展示错误)；无消息=链路上层(只标红，不展示)
+  if (st === 'fail') n._error = info || null
   else if (st === 'running' || st === 'ok') n._error = null   // 重跑到此节点时清旧错误
   lgcanvas.setDirty(true, true)
 }
@@ -724,12 +725,13 @@ function reconcilePreviews() {
   }
 }
 
-// 找人机交互节点上游的设备节点（经 Video 连线）。
+// 找人机交互节点上游的设备源节点（经 device 连线）。
 function upstreamDevice(node) {
-  const slot = (node.inputs || []).findIndex(i => i.name === 'video')
+  const slot = (node.inputs || []).findIndex(i => i.name === 'device')
   if (slot >= 0) {
     const up = node.getInputNode(slot)
-    if (up && up._spec?.category === '设备') return up
+    // 设备源节点：device/local 等；排除「设备属性」(device/attrs，它不是源)
+    if (up && up._spec?.type?.startsWith('device/') && up._spec.type !== 'device/attrs') return up
   }
   return null
 }
