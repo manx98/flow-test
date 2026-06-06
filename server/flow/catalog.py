@@ -67,6 +67,42 @@ def _device_outputs():
             _p("height", T.NUMBER, "*", desc="屏幕高度（像素）；被拉取时会连接设备")]
 
 
+# Python 脚本节点注入的内置函数(等价各组件)与对象，供「组件说明」详细展示
+def _fn(sig, desc):
+    return {"sig": sig, "desc": desc}
+
+
+_SCRIPT_FUNCS = [
+    _fn("image(name)", "按文件名加载模板图片（等价「模板图片」）"),
+    _fn("find_image(template, similarity=0.7, mask=None, timeout=0)",
+        "找图：在画面找模板，命中返回 Match，否则 None（等价「找图」）"),
+    _fn("find_text(text, regex=False, ocr=None, timeout=0)",
+        "找文字(OCR)：命中返回 Match，否则 None；ocr 缺省用会话默认引擎（等价「找文字」）"),
+    _fn("find_all(template, similarity=0.7)", "找全部：返回所有命中的 Match 列表（等价「找全部」）"),
+    _fn("wait_appear(template, timeout=10)", "等出现：出现返回 Match，超时返回 None（等价「等出现」）"),
+    _fn("wait_vanish(template, timeout=10)", "等消失：消失返回 True，超时返回 False（等价「等消失」）"),
+    _fn("to_point(match, anchor='center', dx=0, dy=0)",
+        "Match→坐标点；anchor=center/top-left/…，再加偏移（等价「坐标转换」）"),
+    _fn("click(target, button='left', double=False)", "在点坐标点击；target 可为 Location/Match（等价「点击」）"),
+    _fn("type_text(text, paste=False)", "输入文本；paste=True 走剪贴板粘贴（等价「输入文本」）"),
+    _fn("scroll(target, dy=-1)", "在点坐标滚动滚轮（等价「滚动」）"),
+    _fn("drag(src, dst)", "从 src 点拖拽到 dst 点（等价「拖拽」）"),
+    _fn("delay(seconds=1.0)", "延时若干秒，可被中止（等价「延时」）"),
+    _fn("log(value, label='')", "把值写入运行日志（等价「日志」）"),
+    _fn("alert(message, level='info')", "弹出非阻塞提示，level=info/warn/error（等价「提示」）"),
+    _fn("get_var(name, default=None)", "读取 flow 变量（等价「取变量」）"),
+    _fn("set_var(name, value)", "写入 flow 变量（等价「设变量」）"),
+]
+
+_SCRIPT_INJECTS = [
+    {"name": "dev", "desc": "默认设备(visauto Device/Region)；可直接 dev.find / dev.click / dev.capture 等"},
+    {"name": "visauto", "desc": "visauto 模块（Image / Pattern / Location / Region / Match / Key 等）"},
+    {"name": "Pattern", "desc": "模板匹配类：Pattern(img, similarity=…, mask=…)"},
+    {"name": "vars", "desc": "flow 变量字典（与 get_var/set_var 同一份）"},
+    {"name": "flow", "desc": "上述内置函数所在对象，亦可 flow.find_image(...) 这样调用"},
+]
+
+
 # ---- 节点定义 ----
 _NODES = [
     # ===== 设备 =====
@@ -332,9 +368,10 @@ _NODES = [
 
     # ===== 脚本/日志 =====
     {"type": "script/python", "category": "脚本", "title": "Python 脚本",
-     "description": "在节点内多行编辑器写 Python（语法高亮 + jedi 补全）。注入 dev(默认设备)、visauto、Pattern、vars(flow 变量)，"
-                    "以及等价各组件的功能函数：find_image / find_text / find_all / wait_appear / wait_vanish / to_point / "
-                    "click / type_text / scroll / drag / delay / log / alert / image / get_var / set_var（亦可经 flow.* 调用）。",
+     "description": "在节点内多行编辑器写 Python（语法高亮 + jedi 补全 + 语法检查）。已注入默认设备与等价各组件的"
+                    "内置函数，详见下方「注入对象」与「内置函数」。",
+     "functions": _SCRIPT_FUNCS,
+     "injects": _SCRIPT_INJECTS,
      "inputs": [_exec_in()],
      "outputs": [_exec_out()],
      "properties": [_pr("code", "code",

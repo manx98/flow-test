@@ -63,6 +63,15 @@ function section(title) {
   return h
 }
 
+// 等宽代码单元格（函数签名 / 注入名）
+function codeCell(text) {
+  const c = document.createElement('code')
+  c.textContent = text
+  Object.assign(c.style, { fontFamily: 'monospace', color: '#dcdcaa', userSelect: 'text' })
+  c.addEventListener('mousedown', (e) => e.stopPropagation())
+  return c
+}
+
 // 打开组件说明弹窗。spec=节点 _spec；colors=catalog.types 颜色表。
 export function showNodeHelp(spec, colors) {
   if (!spec) return
@@ -148,6 +157,20 @@ export function showNodeHelp(spec, colors) {
     })
     row.appendChild(lbl); row.appendChild(code); row.appendChild(copy)
     panel.appendChild(row)
+  }
+
+  // 注入对象 + 内置函数（目前仅 Python 脚本节点带这些字段）
+  if (spec.injects && spec.injects.length) {
+    panel.appendChild(section('注入对象'))
+    const { table, tbody } = makeTable(['名称', '说明'])
+    for (const o of spec.injects) addRow(tbody, [codeCell(o.name), o.desc])
+    panel.appendChild(table)
+  }
+  if (spec.functions && spec.functions.length) {
+    panel.appendChild(section('内置函数（等价各组件）'))
+    const { table, tbody } = makeTable(['函数', '说明'])
+    for (const f of spec.functions) addRow(tbody, [codeCell(f.sig), f.desc])
+    panel.appendChild(table)
   }
 
   const ports = (list, label) => {
