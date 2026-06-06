@@ -29,6 +29,19 @@ def health():
     return {"ok": True}
 
 
+@app.on_event("startup")
+async def _warm_complete():
+    # 后台预热 jedi(解析 visauto/常用 stdlib)，把一次性模块分析成本挪到启动期，
+    # 用户首次代码补全即秒回。失败/未装 jedi 时静默跳过，不影响启动。
+    async def _run():
+        try:
+            from .complete import warmup
+            await asyncio.to_thread(warmup)
+        except Exception:
+            pass
+    asyncio.create_task(_run())
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     try:

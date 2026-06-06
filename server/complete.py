@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 
 # 用类型化的 def 桩声明注入的组件功能函数（不 import 工程包，避免 jedi 追进 visauto/engine
 # 触发重型静态分析导致整体补全失败）。返回类型用 visauto 自带类型，便于链式补全。
@@ -49,6 +50,10 @@ def _jedi_ctx():
     global _CTX
     if _CTX is None:
         import jedi
+        # 关闭动态推断(跟踪函数调用返回/数组增量/控制流)，代码补全用不上，徒增耗时
+        jedi.settings.dynamic_params = False
+        jedi.settings.dynamic_array_additions = False
+        jedi.settings.dynamic_flow_information = False
         try:
             env = jedi.get_default_environment()
             proj = jedi.Project(path=os.getcwd(), environment_path=env.executable)
@@ -58,8 +63,7 @@ def _jedi_ctx():
     return _CTX
 
 
-def complete(code: str, line: int, column: int, limit: int = 40) -> list[dict]:
-    """line 为 1 基（用户代码内），column 为 0 基。返回 [{name, type}]。"""
+def _complete(code: str, line: int, column: int, limit: int) -> tuple:
     import jedi
     src = _PREAMBLE + (code or "")
     lines = src.split("\n")
@@ -70,14 +74,38 @@ def complete(code: str, line: int, column: int, limit: int = 40) -> list[dict]:
     try:
         comps = jedi.Script(src, environment=env, project=proj).complete(tline, tcol)
     except Exception:
-        return []
-    out: list[dict] = []
-    seen: set[str] = set()
+        return ()
+    out: list = []
+    seen: set = set()
     for c in comps:
         if c.name.startswith("__") or c.name in seen:
             continue
         seen.add(c.name)
-        out.append({"name": c.name, "type": c.type})
+        out.append((c.name, c.type))
         if len(out) >= limit:
             break
-    return out
+    return tuple(out)
+
+
+# 结果记忆：同一 (代码, 行, 列) 短期内重复请求(光标往返/重新触发)直接命中，省去 jedi
+@lru_cache(maxsize=128)
+def _complete_memo(code: str, line: int, column: int, limit: int) -> tuple:
+    return _complete(code, line, column, limit)
+
+
+def complete(code: str, line: int, column: int, limit: int = 40) -> list[dict]:
+    """line 为 1 基（用户代码内），column 为 0 基。返回 [{name, type}]。"""
+    pairs = _complete_memo(code or "", int(line), int(column), int(limit))
+    return [{"name": n, "type": t} for n, t in pairs]
+
+
+def warmup() -> None:
+    """后台预热：先让 jedi 解析好前导(visauto 类型)与常用 stdlib，
+    把一次性的模块分析成本(可达数百 ms~1s)挪到启动期，用户首次补全即秒回。"""
+    for code, ln, col in (("dev.", 1, 4), ("find_image(\"a\").", 1, 16),
+                          ("import os\nos.", 2, 3), ("import sys\nsys.", 2, 4),
+                          ("import re\nre.", 2, 3)):
+        try:
+            _complete(code, ln, col, 40)
+        except Exception:
+            pass
