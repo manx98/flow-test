@@ -102,6 +102,26 @@ function registerOne(spec) {
         })
       })
     }
+    // 顺序：动态增减 exec 出口（出口按槽位顺序依次执行）
+    if (spec.type === 'flow/sequence') {
+      const execOuts = () => (this.outputs || []).filter((o) => o.type === EXEC)
+      this.addWidget('button', '+ 出口', null, () => {
+        const nums = execOuts().map((o) => parseInt(o.name, 10)).filter((n) => !isNaN(n))
+        this.addOutput(String((nums.length ? Math.max(...nums) : 0) + 1), EXEC)
+        this.setDirtyCanvas(true, true)
+      })
+      this.addWidget('button', '- 出口', null, (w, canvas, node, pos, event) => {
+        const names = execOuts().map((o) => o.name)
+        if (names.length <= 1) return   // 至少保留一个出口
+        new LiteGraph.ContextMenu(names, {
+          event, title: '删除出口',
+          callback: (name) => {
+            const slot = this.findOutputSlot(name)
+            if (slot >= 0) { this.removeOutput(slot); this.setDirtyCanvas(true, true) }
+          },
+        })
+      })
+    }
     // 取变量：value 连接点类型随 type 属性切换（自定义连接点类型）
     if (spec.type === 'var/get') {
       const isSet = false

@@ -284,8 +284,10 @@ def _run_loop(ctx, node):
 
 @handler("flow/sequence", "run")
 def _run_sequence(ctx, node):
-    for s in ("1", "2", "3"):
-        ctx.run_branch(node, s)
+    # 出口可动态增减：按槽位顺序依次执行所有 exec 出口分支
+    for slot in node.get("outputs") or []:
+        if slot.get("type") == "exec":
+            ctx.run_branch(node, slot.get("name"))
     return None
 
 

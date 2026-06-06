@@ -279,7 +279,7 @@ _NODES = [
      "outputs": [_exec_out("body", "循环体分支：每轮执行"),
                  _exec_out("done", "结束分支：循环完成后走这里")], "properties": []},
     {"type": "flow/sequence", "category": "控制流", "title": "顺序",
-     "description": "依次执行多个分支：1 → 2 → 3。",
+     "description": "依次执行多个分支：1 → 2 → 3。可用「+ 出口 / - 出口」动态增减出口端口(按槽位顺序执行)。",
      "inputs": [_exec_in()],
      "outputs": [_exec_out("1", "第 1 个执行分支"),
                  _exec_out("2", "第 2 个执行分支"),
