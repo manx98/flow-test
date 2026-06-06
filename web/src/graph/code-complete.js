@@ -12,8 +12,11 @@ const VISAUTO = ['Device', 'Region', 'Element', 'Match', 'Image', 'ImagePath', '
 const PATTERN = ['similar', 'grayscale', 'mask', 'target_offset']
 const DICT = ['get', 'keys', 'values', 'items', 'pop', 'update', 'setdefault', 'clear']
 
-const MEMBERS = { dev: DEV, visauto: VISAUTO, Pattern: PATTERN, out: DICT, inp: DICT, vars: DICT }
-const GLOBALS = ['dev', 'visauto', 'inp', 'out', 'vars', 'Pattern']
+// 脚本节点注入的「组件功能函数」（与 server/flow/engine.py ScriptAPI 一致）
+const FLOW = ['image', 'find_image', 'find_text', 'find_all', 'wait_appear', 'wait_vanish',
+  'to_point', 'click', 'type_text', 'scroll', 'drag', 'delay', 'log', 'alert', 'get_var', 'set_var']
+const MEMBERS = { dev: DEV, visauto: VISAUTO, Pattern: PATTERN, vars: DICT, flow: FLOW }
+const GLOBALS = ['dev', 'visauto', 'vars', 'Pattern', 'flow', ...FLOW]
 const KEYWORDS = ['and', 'as', 'assert', 'break', 'class', 'continue', 'def', 'del', 'elif',
   'else', 'except', 'False', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
   'lambda', 'None', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'True', 'try', 'while',
@@ -61,7 +64,7 @@ function candidates(text, pos) {
     pool = [...GLOBALS, ...KEYWORDS, ...BUILTINS, ...STDLIB, ...bufferWords(text)]
   }
   if (!memberAccess && word.length < 1) return { word, list: [] }
-  const list = uniq(pool).filter(w => w.startsWith(word) && w !== word).sort().slice(0, 12)
+  const list = uniq(pool).filter(w => w.startsWith(word)).sort().slice(0, 12)
   return { word, list }
 }
 
@@ -95,6 +98,8 @@ export function attachCompletion(ta, onChange) {
   let reqSeq = 0, timer = null
 
   const close = () => { box.style.display = 'none'; items = [] }
+  // 唯一候选就是已输入的词时无意义（提示栏只会重复你刚打的字），不弹
+  const useful = (list) => list.length > 0 && !(list.length === 1 && list[0] === curWord)
 
   const show = (list) => {
     if (!list.length) return close()
@@ -119,15 +124,15 @@ export function attachCompletion(ta, onChange) {
     curWord = currentWord(ta)
     const code = ta.value, pos = ta.selectionStart
     const local = candidates(code, pos).list
-    if (local.length) show(local)                // 立即反馈，基础语法永不缺失
+    if (useful(local)) show(local)               // 立即反馈，基础语法永不缺失
     const { line, column } = lineCol(ta)
     const seq = ++reqSeq
     try {
       const comps = await api.complete(code, line, column)
       if (seq !== reqSeq) return                 // 过期响应丢弃
-      const names = comps.map(c => c.name).filter(n => n !== curWord)
+      const names = comps.map(c => c.name)       // 保留精确匹配（如 import os 的 os）
       const merged = uniq([...names, ...local])  // jedi 语义 + 本地基础
-      if (merged.length) show(merged)
+      if (useful(merged)) show(merged)
       else close()
     } catch (_) {
       if (!local.length) close()                 // 后端失败且本地无候选才关闭

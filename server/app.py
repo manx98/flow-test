@@ -1,6 +1,7 @@
 """FastAPI 入口：工程/图 REST + 静态前端 + (后续) WebRTC/WS 路由。"""
 from __future__ import annotations
 
+import asyncio
 import os
 
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -159,13 +160,27 @@ def api_get_result(name: str, run: str, fname: str):
 
 
 # ======================= 脚本代码补全（jedi）=======================
+# jedi 补全是 CPU 密集(数十~数百 ms 且持 GIL)。快速打字会瞬间堆积大量请求，同步处理会把
+# 线程池/GIL 打满导致整个服务卡死。这里：① 异步路由 + 单线程串行(一次只跑一个 jedi)；
+# ② 合并去抖——排队期间若有更新请求到达，过期的直接跳过，只算最后一个(最后按键胜出)。
+_complete_lock = asyncio.Lock()
+_complete_seq = 0
+
+
 @app.post("/api/complete")
-def api_complete(body: CompleteReq):
-    from .complete import complete
-    try:
-        return {"completions": complete(body.code, body.line, body.column)}
-    except ImportError:
-        raise HTTPException(503, "代码补全需要 jedi：pip install jedi")
+async def api_complete(body: CompleteReq):
+    global _complete_seq
+    _complete_seq += 1
+    mine = _complete_seq
+    async with _complete_lock:
+        if mine != _complete_seq:          # 已有更新的请求在排队，本次过期，丢弃
+            return {"completions": []}
+        try:
+            from .complete import complete
+            comps = await asyncio.to_thread(complete, body.code, body.line, body.column)
+            return {"completions": comps}
+        except ImportError:
+            raise HTTPException(503, "代码补全需要 jedi：pip install jedi")
 
 
 # ======================= 节点目录（前端建面板用）=======================

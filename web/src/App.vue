@@ -750,6 +750,8 @@ function reconcileInteractions() {
 
 <style>
 html, body, #app { height: 100%; margin: 0; }
+/* 节点右键菜单需盖过画面区 DOM 覆盖层（脚本编辑器 z-index:45、错误条 60 等），否则会被遮挡 */
+.litegraph.litecontextmenu { z-index: 1000 !important; }
 .app { display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
 .toolbar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: #2b2b2b; color: #eee; }
 .toolbar select, .toolbar button { padding: 3px 8px; }

@@ -46,8 +46,14 @@ export class CodeOverlay {
     ta.addEventListener('scroll', () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft })
     const destroyCompletion = attachCompletion(ta, commit)
     // 不让事件冒泡到画布（避免拖动/删除/缩放/框选）
-    for (const ev of ['mousedown', 'wheel', 'keydown', 'contextmenu'])
+    for (const ev of ['wheel', 'keydown', 'contextmenu'])
       ta.addEventListener(ev, (x) => x.stopPropagation())
+    // mousedown 同样不冒泡到画布；但 stopPropagation 会挡住 LiteGraph 的「点外部关菜单」，
+    // 故手动关掉已打开的右键菜单（否则点编辑器时菜单不消失）
+    ta.addEventListener('mousedown', (x) => {
+      x.stopPropagation()
+      LiteGraph.closeAllContextMenus(window)
+    })
     // Tab 插入两个空格
     ta.addEventListener('keydown', (x) => {
       if (x.key === 'Tab') {

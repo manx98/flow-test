@@ -1,5 +1,6 @@
 // 把 /api/nodes 目录注册成 LiteGraph 节点类型，带类型上色与连线校验。
 import { LiteGraph, LGraphCanvas } from 'litegraph.js'
+import { showNodeHelp } from './help-dialog.js'
 
 const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any'
 
@@ -147,6 +148,13 @@ function registerOne(spec) {
   }
   NodeClass.title = spec.title
   NodeClass.desc = spec.type
+  // 右键菜单顶部加「📖 组件说明」：弹窗展示描述 + 出入参 + 属性
+  NodeClass.prototype.getExtraMenuOptions = function () {
+    return [
+      { content: '📖 组件说明', callback: () => showNodeHelp(this._spec, CATALOG && CATALOG.types) },
+      null,
+    ]
+  }
   // 连线类型校验：拒绝不兼容
   NodeClass.prototype.onConnectInput = function (targetSlot, type, output) {
     const dst = this.inputs[targetSlot]

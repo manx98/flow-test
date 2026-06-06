@@ -393,13 +393,11 @@ def _run_find_all(ctx, node):
 
 
 # ---- 坐标转换（Match → Point）----
-@handler("geom/to_point", "eval")
-def _eval_to_point(ctx, node):
-    m = ctx.get_input(node, "match")
+def _match_to_point(m, anchor="center", dx=0, dy=0):
+    """Match → Location：按锚点取矩形位置再加偏移。m 为 None 时返回 None。"""
     if m is None:
-        return {"point": None}
-    anchor = ctx.graph.prop(node, "anchor", "center")
-    dx, dy = int(ctx.graph.prop(node, "dx", 0)), int(ctx.graph.prop(node, "dy", 0))
+        return None
+    dx, dy = int(dx), int(dy)
     if anchor == "top-left":
         x, y = m.x, m.y
     elif anchor == "top-right":
@@ -411,7 +409,15 @@ def _eval_to_point(ctx, node):
     else:  # center
         c = m.center
         x, y = c.x, c.y
-    return {"point": visauto.Location(x + dx, y + dy)}
+    return visauto.Location(x + dx, y + dy)
+
+
+@handler("geom/to_point", "eval")
+def _eval_to_point(ctx, node):
+    m = ctx.get_input(node, "match")
+    anchor = ctx.graph.prop(node, "anchor", "center")
+    dx, dy = ctx.graph.prop(node, "dx", 0), ctx.graph.prop(node, "dy", 0)
+    return {"point": _match_to_point(m, anchor, dx, dy)}
 
 
 # ---- 动作（按点坐标执行；设备经 mouse 输出连线解析）----
@@ -531,21 +537,141 @@ def _run_alert(ctx, node):
     return "out"
 
 
+class ScriptAPI:
+    """脚本节点可用的「组件功能函数」：等价于各内置组件的运行逻辑，作用于默认设备。
+
+    注入到脚本命名空间（既可经 flow.xxx 调用，常用函数也直接以同名暴露）。
+    """
+
+    def __init__(self, ctx, node):
+        self._ctx = ctx
+        self._node = node
+
+    @property
+    def dev(self):
+        d = self._ctx.default_device()
+        if d is None:
+            raise RuntimeError("脚本节点未连到任何设备")
+        return d
+
+    @staticmethod
+    def image(name):
+        """按文件名加载模板图片（等价「模板图片」组件）。"""
+        return visauto.Image(name)
+
+    def _pattern(self, template, similarity=0.7, mask=None):
+        if isinstance(template, Pattern):
+            return template
+        return Pattern(template, similarity=similarity, mask=mask)
+
+    def find_image(self, template, similarity=0.7, mask=None, timeout=0):
+        """找图（等价「找图」组件）：命中返回 Match，否则 None。"""
+        return self.dev.exists(self._pattern(template, similarity, mask), timeout=timeout)
+
+    def find_text(self, text, regex=False, ocr=None, timeout=0):
+        """找文字（等价「找文字(OCR)」组件）：命中返回 Match，否则 None。"""
+        return self.dev.exists(text=text, regex=regex, ocr=ocr, timeout=timeout)
+
+    def find_all(self, template, similarity=0.7):
+        """找全部（等价「找全部」组件）：返回 Match 列表。"""
+        return self.dev.find_all(self._pattern(template, similarity))
+
+    def wait_appear(self, template, timeout=10):
+        """等出现（等价「等出现」组件）：出现返回 Match，超时返回 None。"""
+        return self.dev.exists(self._pattern(template), timeout=timeout)
+
+    def wait_vanish(self, template, timeout=10):
+        """等消失（等价「等消失」组件）：消失返回 True，超时返回 False。"""
+        return self.dev.wait_vanish(self._pattern(template), timeout=timeout)
+
+    @staticmethod
+    def to_point(match, anchor="center", dx=0, dy=0):
+        """坐标转换（等价「坐标转换」组件）：Match → Location。"""
+        return _match_to_point(match, anchor, dx, dy)
+
+    def click(self, target, button="left", double=False):
+        """点击（等价「点击」组件）。target 可为 Location/Match/点。"""
+        x, y = _xy(target)
+        if double:
+            self.dev.mouse.double_click(x, y)
+        elif button == "right":
+            self.dev.mouse.right_click(x, y)
+        else:
+            self.dev.mouse.click(x, y)
+
+    def type_text(self, text, paste=False):
+        """输入文本（等价「输入文本」组件）。"""
+        if paste:
+            self.dev.paste(text)
+        else:
+            self.dev.type(text)
+
+    def scroll(self, target, dy=-1):
+        """滚动（等价「滚动」组件）。"""
+        x, y = _xy(target)
+        self.dev.mouse.scroll(x, y, 0, int(dy))
+
+    def drag(self, src, dst):
+        """拖拽（等价「拖拽」组件）：从 src 拖到 dst。"""
+        sx, sy = _xy(src)
+        dx, dy = _xy(dst)
+        self.dev.mouse.drag_drop(sx, sy, dx, dy)
+
+    def delay(self, seconds=1.0):
+        """延时（等价「延时」组件）：可中止。"""
+        end = time.monotonic() + float(seconds)
+        while time.monotonic() < end:
+            check_abort()
+            time.sleep(min(0.1, end - time.monotonic()))
+
+    def log(self, value, label=""):
+        """日志（等价「日志」组件）：写入运行日志。"""
+        self._ctx.report.log(f"{label}{value}" if label else str(value))
+
+    def alert(self, message, level="info"):
+        """提示（等价「提示」组件）：弹出非阻塞提示。"""
+        self._ctx.emit({"type": "alert", "id": self._node["id"],
+                        "level": level, "message": str(message)})
+        self._ctx.report.log(f"[提示] {message}")
+
+    def get_var(self, name, default=None):
+        """取变量（等价「取变量」组件）。"""
+        return self._ctx.vars.get(name, default)
+
+    def set_var(self, name, value):
+        """设变量（等价「设变量」组件）。"""
+        self._ctx.vars[name] = value
+
+
 @handler("script/python", "run")
 def _run_script(ctx, node):
     code = ctx.graph.prop(node, "code", "")
-    inp = ctx.get_input(node, "bundle") or {}
-    out: dict = {}
+    flow = ScriptAPI(ctx, node)
     ns = {
         "visauto": visauto,
         "dev": ctx.default_device(),
-        "inp": inp,
-        "out": out,
         "vars": ctx.vars,
         "Pattern": Pattern,
+        "flow": flow,
+        # 组件功能函数：直接可用
+        "image": flow.image,
+        "find_image": flow.find_image,
+        "find_text": flow.find_text,
+        "find_all": flow.find_all,
+        "wait_appear": flow.wait_appear,
+        "wait_vanish": flow.wait_vanish,
+        "to_point": flow.to_point,
+        "click": flow.click,
+        "type_text": flow.type_text,
+        "scroll": flow.scroll,
+        "drag": flow.drag,
+        "delay": flow.delay,
+        "log": flow.log,
+        "alert": flow.alert,
+        "get_var": flow.get_var,
+        "set_var": flow.set_var,
     }
     exec(compile(code, "<script-node>", "exec"), ns)
-    ctx.set_output(node, "bundle", out)
     return "out"
 
 
