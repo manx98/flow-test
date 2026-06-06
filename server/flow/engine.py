@@ -222,29 +222,20 @@ def _eval_image(ctx, node):
     return {"picture": visauto.Image(name)} if name else {"picture": None}
 
 
-@handler("vision/screenshot", "eval")
-def _eval_screenshot(ctx, node):
-    """截图节点输出框选区域作为模板。未截图或未框选则在本节点报错并中断。"""
-    name = ctx.graph.prop(node, "image", "")
-    if not name:
-        ctx.on_state(node["id"], "fail", "截图节点尚未截图")
-        raise RuntimeError("截图节点尚未截图")
-    crop = ctx.graph.prop(node, "crop", None)
-    if not (isinstance(crop, dict) and all(k in crop for k in ("x", "y", "w", "h"))):
-        ctx.on_state(node["id"], "fail", "截图节点未框选区域")
-        raise RuntimeError("截图节点未框选区域")
-    img = visauto.Image(name)
-    x, y, w, h = (int(crop["x"]), int(crop["y"]), int(crop["w"]), int(crop["h"]))
-    sub = img.mat[max(0, y):y + h, max(0, x):x + w]
-    if not sub.size:
-        ctx.on_state(node["id"], "fail", "截图节点框选区域无效")
-        raise RuntimeError("截图节点框选区域无效")
-    return {"picture": visauto.Image(sub)}
-
-
 @handler("vision/preview", "eval")
 def _eval_preview(ctx, node):
     return {"picture": ctx.get_input(node, "picture")}   # 透传，仅用于查看
+
+
+@handler("mask/create", "eval")
+def _eval_mask(ctx, node):
+    """遮罩节点：加载绘制好的遮罩图（白=参与匹配 255 / 黑=忽略 0），输出灰度 ndarray。"""
+    name = ctx.graph.prop(node, "mask", "")
+    if not name:
+        return {"mask": None}
+    import cv2
+    mat = visauto.Image(name).mat
+    return {"mask": cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)}
 
 
 @handler("const/text", "eval")
@@ -361,9 +352,10 @@ def _run_find_image(ctx, node):
     tmpl = ctx.get_input(node, "template")
     if tmpl is None:
         raise RuntimeError("找图节点缺少模板")
+    mask = ctx.get_input(node, "mask")   # 可选遮罩（ndarray，255 参与/0 忽略）
     sim = float(ctx.graph.prop(node, "similarity", 0.7))
     timeout = float(ctx.graph.prop(node, "timeout", 0))
-    m = dev.exists(Pattern(tmpl, similarity=sim), timeout=timeout)
+    m = dev.exists(Pattern(tmpl, similarity=sim, mask=mask), timeout=timeout)
     ctx.set_output(node, "match", m)
     ctx.set_output(node, "ok", m is not None)
     return "found" if m is not None else "notFound"

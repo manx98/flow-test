@@ -17,6 +17,7 @@ BOOL = "bool"
 POINT = "point"
 NUMBER = "number"
 OCR = "ocr"
+MASK = "mask"
 BUNDLE = "bundle"
 ANY = "any"
 
@@ -33,11 +34,12 @@ TYPE_COLORS = {
     POINT: "#4DB6AC",
     NUMBER: "#9FA8DA",
     OCR: "#7E57C2",
+    MASK: "#26A69A",
     BUNDLE: "#A1887F",
     ANY: "#BDBDBD",
 }
 
-DATA_TYPES = {VIDEO, PICTURE, MOUSE, KEYBOARD, MATCH, TEXT, BOOL, POINT, NUMBER, OCR, BUNDLE, ANY}
+DATA_TYPES = {VIDEO, PICTURE, MOUSE, KEYBOARD, MATCH, TEXT, BOOL, POINT, NUMBER, OCR, MASK, BUNDLE, ANY}
 
 
 def compatible(src_type: str, dst_type: str) -> bool:

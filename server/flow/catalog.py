@@ -93,18 +93,21 @@ _NODES = [
      "properties": [], "widget": "video"},
 
     # ===== 采集 =====
-    {"type": "vision/screenshot", "category": "视觉", "title": "视频截图",
-     "inputs": [_p("video", T.VIDEO, "1", True)],
-     "outputs": [_p("picture", T.PICTURE, "*")],
-     "properties": [{"name": "crop", "type": "rect", "default": None}], "widget": "capture"},
     {"type": "vision/preview", "category": "视觉", "title": "图片预览",
      "inputs": [_p("picture", T.PICTURE, "1", True)],
      "outputs": [_p("picture", T.PICTURE, "*")],
      "properties": [], "widget": "preview"},
 
+    # ===== 遮罩 =====
+    {"type": "mask/create", "category": "视觉", "title": "创建遮罩",
+     "inputs": [_p("picture", T.PICTURE, "1", True)],
+     "outputs": [_p("mask", T.MASK, "*")],
+     "properties": [{"name": "mask", "type": "image", "default": ""}], "widget": "mask"},
+
     # ===== 查找 =====
     {"type": "vision/find_image", "category": "视觉", "title": "找图",
-     "inputs": [_exec_in(), _p("video", T.VIDEO, "1", True), _p("template", T.PICTURE, "1")],
+     "inputs": [_exec_in(), _p("video", T.VIDEO, "1", True), _p("template", T.PICTURE, "1"),
+                _p("mask", T.MASK, "1")],
      "outputs": [_exec_out("found"), _exec_out("notFound"),
                  _p("match", T.MATCH, "*"), _p("ok", T.BOOL)],
      "properties": [{"name": "similarity", "type": "number", "default": 0.7},

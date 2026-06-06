@@ -15,10 +15,12 @@ let CATALOG = null
 let deviceActionHandler = null
 let captureHandler = null
 let imageActionHandler = null
+let maskActionHandler = null
 
 export function setDeviceActionHandler(fn) { deviceActionHandler = fn }
 export function setCaptureHandler(fn) { captureHandler = fn }
 export function setImageActionHandler(fn) { imageActionHandler = fn }
+export function setMaskActionHandler(fn) { maskActionHandler = fn }
 
 export function registerCatalog(catalog) {
   CATALOG = catalog
@@ -55,19 +57,12 @@ function registerOne(spec) {
         deviceActionHandler && deviceActionHandler(this)
       })
     }
-    // 人机交互节点：预留画面区，显示上游设备视频并把鼠标键盘转发回设备
+    // 人机交互节点：截图按钮 + 画面区（显示上游设备视频并把鼠标键盘转发回设备）
     if (spec.type === 'io/interaction') {
-      this._showVideo = true
-    }
-    // 视频截图节点：截图按钮 + 清除裁剪按钮（帧回显与框选裁剪由 ShotOverlay 处理）
-    if (spec.type === 'vision/screenshot') {
       this.addWidget('button', '📷 截图', null, () => {
         captureHandler && captureHandler(this)
       })
-      this.addWidget('button', '清除裁剪', null, () => {
-        this.properties.crop = null; this.setDirtyCanvas(true, true)
-      })
-      this._showShot = true
+      this._showVideo = true
     }
     // 模板图片节点：本地上传 / 剪贴板粘贴 两种方式选图（回显由 ShotOverlay 处理）
     if (spec.type === 'const/image') {
@@ -81,6 +76,13 @@ function registerOne(spec) {
     }
     // 图片预览节点：显示上游 PICTURE（ShotOverlay 渲染）
     if (spec.type === 'vision/preview') this._showShot = true
+    // 创建遮罩节点：编辑遮罩按钮 + 回显遮罩（ShotOverlay 渲染）
+    if (spec.type === 'mask/create') {
+      this.addWidget('button', '✏ 编辑遮罩', null, () => {
+        maskActionHandler && maskActionHandler(this)
+      })
+      this._showShot = true
+    }
     // 脚本节点：嵌多行代码编辑器（CodeOverlay 渲染），预留较大尺寸
     if (spec.type === 'script/python') this._showCode = true
     this.size = this.computeSize()

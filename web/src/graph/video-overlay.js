@@ -14,11 +14,13 @@ function aspectOf(conn) {
   return conn.width && conn.height ? conn.width / conn.height : 16 / 9
 }
 
-// 顶部留给输入/输出端口行的高度（节点单位）：行数 × 槽高 + 一点内边距。
+// 顶部留给端口行 + 按钮 widgets 的高度（节点单位）：让画面落到它们下方。
 function headerHeight(node) {
   const slotH = LiteGraph.NODE_SLOT_HEIGHT || 20
+  const wh = LiteGraph.NODE_WIDGET_HEIGHT || 20
   const rows = Math.max(node.inputs?.length || 0, node.outputs?.length || 0)
-  return rows * slotH + 6
+  const widgets = node.widgets ? node.widgets.length : 0
+  return rows * slotH + widgets * (wh + 4) + 6
 }
 
 export class VideoOverlay {

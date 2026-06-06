@@ -46,6 +46,37 @@
       <canvas ref="canvasEl" class="graph"></canvas>
       <div ref="overlayEl" class="overlay"></div>
 
+      <div v-if="showCropper" class="crop-modal" @mousedown.self="closeCropper">
+        <div class="crop-dialog">
+          <div class="crop-head">截图编辑 — 裁剪并命名</div>
+          <div class="crop-stage">
+            <img ref="cropImgEl" :src="cropperSrc" />
+          </div>
+          <div class="crop-foot">
+            <label>名称 <input v-model="cropName" @keyup.enter="saveCrop" /></label>
+            <span class="spacer"></span>
+            <button @click="closeCropper">取消</button>
+            <button class="primary" @click="saveCrop">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="showMask" class="crop-modal" @mousedown.self="closeMask">
+        <div class="crop-dialog">
+          <div class="crop-head">编辑遮罩 — 涂抹要忽略的区域（白=匹配 / 涂抹=忽略）</div>
+          <div class="crop-stage mask-stage">
+            <canvas ref="maskCanvasEl"></canvas>
+          </div>
+          <div class="crop-foot">
+            <label>笔刷 <input type="range" min="4" max="80" v-model.number="maskBrush" @input="onMaskBrush" /></label>
+            <button @click="clearMask">清除</button>
+            <span class="spacer"></span>
+            <button @click="closeMask">取消</button>
+            <button class="primary" @click="saveMask">保存</button>
+          </div>
+        </div>
+      </div>
+
       <div class="toasts">
         <div v-for="t in toasts" :key="t.id" class="toast" :class="t.level">
           {{ t.message }}
@@ -98,8 +129,11 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { LGraph, LGraphCanvas, LiteGraph } from 'litegraph.js'
+import Cropper from 'cropperjs'
+import 'cropperjs/dist/cropper.css'
+import { fabric } from 'fabric'
 import { api } from './api.js'
-import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageActionHandler } from './graph/litegraph-setup.js'
+import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageActionHandler, setMaskActionHandler } from './graph/litegraph-setup.js'
 import { VideoOverlay } from './graph/video-overlay.js'
 import { ShotOverlay } from './graph/shot-overlay.js'
 import { CodeOverlay } from './graph/code-overlay.js'
@@ -261,6 +295,7 @@ onMounted(async () => {
   setDeviceActionHandler(onDeviceAction)
   setCaptureHandler(onCapture)
   setImageActionHandler(onImageAction)
+  setMaskActionHandler(onMaskEdit)
 
   graph.start()
   projects.value = await api.listProjects()
@@ -298,14 +333,14 @@ async function openProject() {
   status.value = `已打开 ${current.value}`
 }
 
-// 工程打开后，把截图节点的帧 / 模板图片节点的图重新载入回显。
+// 工程打开后，把模板图片 / 遮罩节点的图重新载入回显。
 function reloadShots() {
   for (const node of graph._nodes) {
     const t = node._spec?.type
-    if (t === 'vision/screenshot' && node.properties?.image) {
-      shots.setImage(node, api.imageUrl(current.value, node.properties.image))
-    } else if (t === 'const/image' && node.properties?.name) {
+    if (t === 'const/image' && node.properties?.name) {
       shots.setImage(node, api.imageUrl(current.value, node.properties.name))
+    } else if (t === 'mask/create' && node.properties?.mask) {
+      shots.setImage(node, api.imageUrl(current.value, node.properties.mask))
     }
   }
 }
@@ -449,48 +484,199 @@ async function onDeviceAction(node) {
   }
 }
 
-// 顺着 video 输入往上游走，找到提供视频的设备连接（设备节点 _conn）。
-function connFeeding(node) {
-  let cur = node, guard = 0
-  while (cur && guard++ < 20) {
-    if (cur._conn) return cur._conn
-    const slot = (cur.inputs || []).findIndex(i => i.name === 'video')
-    cur = slot >= 0 ? cur.getInputNode(slot) : null
-  }
-  return null
-}
-
-// 视频截图：抓上游设备当前帧，存到工程 images/。
+// 人机交互节点截图：抓当前帧 → 打开 Cropper 裁剪/命名弹框（交互节点的设备连接即 overlay.connOf）。
 async function onCapture(node) {
   if (!current.value) { alert('请先打开工程'); return }
-  const conn = connFeeding(node)
-  if (!conn || !conn.stream) { alert('该截图节点未接入已连接的设备视频'); return }
-  status.value = '截图中…'
+  const conn = overlay.connOf(node)
+  if (!conn || !conn.stream) { alert('该交互节点未接入已连接的设备视频'); return }
   try {
-    const blob = await conn.grabBlob()
-    const fname = `shot_${node.id}_${Date.now()}.png`
-    const r = await api.uploadImage(current.value, blob, fname)
-    node.properties.image = r.name
-    node.properties.crop = null
-    shots.setImage(node, api.imageUrl(current.value, r.name), { fit: true })   // 回显 + 适配卡片尺寸
-    status.value = `已截图 ${r.name}`
+    const canvas = await conn.grabFrame()
+    openCropper(canvas.toDataURL('image/png'), node)
   } catch (e) {
     alert('截图失败: ' + e.message)
-    status.value = '截图失败'
   }
 }
 
-// 顺着图片来源解析出 { name, crop }（模板图片 / 截图含裁剪 / 预览透传）
+// ---- 截图裁剪弹框（Cropper.js）----
+const showCropper = ref(false)
+const cropperSrc = ref('')
+const cropName = ref('')
+const cropImgEl = ref(null)
+let cropper = null
+let cropAnchor = null   // 触发截图的交互节点，用于放置新建的模板节点
+
+async function openCropper(dataUrl, node) {
+  cropperSrc.value = dataUrl
+  cropName.value = `shot_${Date.now()}`
+  cropAnchor = node
+  showCropper.value = true
+  await nextTick()
+  if (cropper) { cropper.destroy(); cropper = null }
+  const img = cropImgEl.value
+  const init = () => {
+    cropper = new Cropper(img, { viewMode: 1, autoCropArea: 0.85, background: false })
+  }
+  // 等图片加载完再初始化，否则 Cropper 按未就绪尺寸建容器，右侧手柄会被裁掉
+  if (img.complete && img.naturalWidth) init()
+  else img.onload = init
+}
+
+function closeCropper() {
+  if (cropper) { cropper.destroy(); cropper = null }
+  showCropper.value = false
+  cropperSrc.value = ''
+  cropAnchor = null
+}
+
+async function saveCrop() {
+  if (!cropper) return
+  let name = (cropName.value || `shot_${Date.now()}`).trim()
+  if (!/\.[a-z0-9]+$/i.test(name)) name += '.png'
+  try {
+    const canvas = cropper.getCroppedCanvas()
+    const blob = await new Promise((res, rej) =>
+      canvas.toBlob((b) => b ? res(b) : rej(new Error('裁剪失败')), 'image/png'))
+    const r = await api.uploadImage(current.value, blob, name)
+    // 创建模板图片节点，放在触发截图的交互节点右侧
+    const n = LiteGraph.createNode('const/image')
+    n.properties.name = r.name
+    const a = cropAnchor
+    n.pos = a ? [a.pos[0] + a.size[0] + 40, a.pos[1]] : [120, 120]
+    graph.add(n)
+    shots.setImage(n, api.imageUrl(current.value, r.name), { fit: true })
+    status.value = `已创建模板图片 ${r.name}`
+    closeCropper()
+  } catch (e) {
+    alert('保存失败: ' + e.message)
+  }
+}
+
+// ---- 遮罩编辑弹框（Fabric.js）----
+const showMask = ref(false)
+const maskBrush = ref(24)
+const maskCanvasEl = ref(null)
+let fcanvas = null
+let maskAnchor = null
+let maskW = 0, maskH = 0   // 模板原生尺寸（导出用）
+
+// 创建遮罩节点「编辑遮罩」：取 picture 上游模板图为底，打开画板涂抹要忽略的区域
+async function onMaskEdit(node) {
+  if (!current.value) { alert('请先打开工程'); return }
+  const slot = (node.inputs || []).findIndex(i => i.name === 'picture')
+  const src = slot >= 0 ? pictureSource(node.getInputNode(slot)) : null
+  if (!src) { alert('请先在 picture 输入连接一个模板图片'); return }
+  maskAnchor = node
+  showMask.value = true
+  await nextTick()
+  const img = await loadImage(api.imageUrl(current.value, src.name))
+  maskW = img.naturalWidth; maskH = img.naturalHeight
+  // 画布用固定可见区（铺满弹框），与图片原生尺寸解耦，避免低高度图片编辑区过窄
+  const stageEl = maskCanvasEl.value.parentElement
+  const vw = Math.max(240, stageEl.clientWidth)
+  const vh = Math.max(240, stageEl.clientHeight)
+  fcanvas = new fabric.Canvas(maskCanvasEl.value, { isDrawingMode: true })
+  fcanvas.setWidth(vw); fcanvas.setHeight(vh)
+  fcanvas.freeDrawingBrush.width = maskBrush.value
+  fcanvas.freeDrawingBrush.color = 'rgba(255,40,40,0.5)'
+  fabric.Image.fromURL(img.src, (im) => {
+    fcanvas.setBackgroundImage(im, fcanvas.requestRenderAll.bind(fcanvas))
+    const z = Math.min(vw / maskW, vh / maskH)   // fit 初始缩放并居中
+    fcanvas.setZoom(z)
+    fcanvas.viewportTransform[4] = (vw - maskW * z) / 2
+    fcanvas.viewportTransform[5] = (vh - maskH * z) / 2
+    fcanvas.requestRenderAll()
+  })
+  _bindMaskNav()
+}
+
+// 滚轮以光标为锚点缩放；右键/Alt 拖拽平移
+function _bindMaskNav() {
+  fcanvas.on('mouse:wheel', (opt) => {
+    const e = opt.e
+    let z = fcanvas.getZoom() * (0.999 ** e.deltaY)
+    z = Math.min(20, Math.max(0.05, z))
+    fcanvas.zoomToPoint({ x: e.offsetX, y: e.offsetY }, z)
+    e.preventDefault(); e.stopPropagation()
+  })
+  let panning = false, lx = 0, ly = 0
+  fcanvas.on('mouse:down', (opt) => {
+    if (opt.e.button === 2 || opt.e.altKey) {
+      panning = true; fcanvas.isDrawingMode = false
+      lx = opt.e.clientX; ly = opt.e.clientY
+    }
+  })
+  fcanvas.on('mouse:move', (opt) => {
+    if (!panning) return
+    const vpt = fcanvas.viewportTransform
+    vpt[4] += opt.e.clientX - lx; vpt[5] += opt.e.clientY - ly
+    lx = opt.e.clientX; ly = opt.e.clientY
+    fcanvas.requestRenderAll()
+  })
+  fcanvas.on('mouse:up', () => { if (panning) { panning = false; fcanvas.isDrawingMode = true } })
+  fcanvas.upperCanvasEl.addEventListener('contextmenu', (e) => e.preventDefault())
+}
+
+function onMaskBrush() { if (fcanvas) fcanvas.freeDrawingBrush.width = maskBrush.value }
+function clearMask() {
+  if (!fcanvas) return
+  fcanvas.getObjects().slice().forEach((o) => fcanvas.remove(o))
+  fcanvas.requestRenderAll()
+}
+function closeMask() {
+  if (fcanvas) { try { fcanvas.dispose() } catch (_) {} fcanvas = null }
+  showMask.value = false
+  maskAnchor = null
+}
+
+// 保存：白底 + 涂抹处黑（255 参与匹配 / 0 忽略），按原生分辨率导出，上传并回显
+async function saveMask() {
+  if (!fcanvas || !maskAnchor) return
+  const w = maskW, h = maskH
+  try {
+    // 重置视图/尺寸到原生、去背景，导出仅笔迹（与原生分辨率对齐）
+    const vpt = fcanvas.viewportTransform.slice()
+    const cw = fcanvas.getWidth(), ch = fcanvas.getHeight()
+    const bg = fcanvas.backgroundImage
+    fcanvas.setBackgroundImage(null)
+    fcanvas.setViewportTransform([1, 0, 0, 1, 0, 0])
+    fcanvas.setWidth(w); fcanvas.setHeight(h)
+    fcanvas.requestRenderAll()
+    const strokesUrl = fcanvas.toDataURL({ format: 'png' })
+    fcanvas.setWidth(cw); fcanvas.setHeight(ch)
+    fcanvas.setViewportTransform(vpt)
+    fcanvas.setBackgroundImage(bg, fcanvas.requestRenderAll.bind(fcanvas))
+    const strokes = await loadImage(strokesUrl)
+
+    const c = document.createElement('canvas'); c.width = w; c.height = h
+    const cx = c.getContext('2d')
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h)
+    const t = document.createElement('canvas'); t.width = w; t.height = h
+    const tctx = t.getContext('2d'); tctx.drawImage(strokes, 0, 0, w, h)
+    const sd = tctx.getImageData(0, 0, w, h).data
+    const out = cx.getImageData(0, 0, w, h)
+    for (let i = 0; i < sd.length; i += 4) {
+      if (sd[i + 3] > 20) { out.data[i] = out.data[i + 1] = out.data[i + 2] = 0 }  // 涂抹处=黑(忽略)
+    }
+    cx.putImageData(out, 0, 0)
+
+    const blob = await new Promise((res, rej) =>
+      c.toBlob((b) => b ? res(b) : rej(new Error('生成遮罩失败')), 'image/png'))
+    const name = `mask_${maskAnchor.id}_${Date.now()}.png`
+    const r = await api.uploadImage(current.value, blob, name)
+    maskAnchor.properties.mask = r.name
+    shots.setImage(maskAnchor, api.imageUrl(current.value, r.name), { fit: true })
+    status.value = `已保存遮罩 ${r.name}`
+    closeMask()
+  } catch (e) {
+    alert('保存遮罩失败: ' + e.message)
+  }
+}
+
+// 顺着图片来源解析出 { name }（模板图片 / 预览透传）
 function pictureSource(node, depth = 0) {
   if (!node || depth > 20) return null
   const t = node._spec?.type
   if (t === 'const/image') return node.properties?.name ? { name: node.properties.name, crop: null } : null
-  if (t === 'vision/screenshot') {
-    const name = node.properties?.image
-    if (!name) return null
-    const c = node.properties?.crop
-    return { name, crop: (c && c.w && c.h) ? c : null }
-  }
   if (t === 'vision/preview') {
     const s = (node.inputs || []).findIndex(i => i.name === 'picture')
     return s >= 0 ? pictureSource(node.getInputNode(s), depth + 1) : null
@@ -625,4 +811,23 @@ html, body, #app { height: 100%; margin: 0; }
 .evid { margin-top: 6px; } .evid .ecap { color: #e88; margin-bottom: 2px; }
 .evid img { max-width: 100%; border: 1px solid #444; }
 .logs { background: #111; padding: 6px; overflow: auto; white-space: pre-wrap; color: #9b9; }
+
+/* 截图裁剪弹框 */
+.crop-modal { position: absolute; inset: 0; z-index: 300; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; }
+.crop-dialog { width: min(820px, 90%); max-height: 88%; background: #1f1f1f; color: #ddd;
+  border-radius: 6px; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
+.crop-head { padding: 8px 12px; background: #2b2b2b; font-size: 13px; border-radius: 6px 6px 0 0; }
+.crop-stage { flex: 1; min-height: 0; padding: 10px; overflow: hidden; background: #111;
+  display: flex; align-items: center; justify-content: center; }
+/* Cropper 会接管 img 的盒子；限制最大尺寸，保证容器(含右/下手柄)落在可视区内 */
+.crop-stage img { display: block; max-width: 100%; max-height: 58vh; }
+.crop-stage .cropper-container { max-width: 100%; }
+.mask-stage { display: block; padding: 0; overflow: hidden; height: min(460px, 60vh); width: 100%; }
+.crop-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #262626; }
+.crop-foot .spacer { flex: 1; }
+.crop-foot input { background: #111; color: #eee; border: 1px solid #444; border-radius: 4px;
+  padding: 3px 6px; }
+.crop-foot button { padding: 4px 12px; }
+.crop-foot .primary { background: #2b6cb0; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 </style>

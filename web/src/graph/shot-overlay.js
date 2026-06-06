@@ -5,9 +5,9 @@ import { LiteGraph } from 'litegraph.js'
 const ZOOM_MAX = 8
 const RESIZE_PAD = 12   // 底部留白(节点单位)，露出 LiteGraph 右下角原生缩放手柄
 
-// 节点当前图片文件名（模板图片 name / 截图 image）
+// 节点当前图片文件名（模板图片 name / 遮罩 mask）
 function nameOf(node) {
-  return node.properties?.name || node.properties?.image || ''
+  return node.properties?.name || node.properties?.mask || ''
 }
 
 // 复制文本到剪贴板（带 execCommand 兜底）
@@ -74,7 +74,6 @@ export class ShotOverlay {
     this.entries.set(node, e)
     this._bindWheel(node, e)
     this._bindPan(node, e)
-    if (node._spec?.type === 'vision/screenshot') this._bindCrop(node, e)  // 仅截图节点支持裁剪
     cap.addEventListener('mousedown', (ev) => ev.stopPropagation())   // 不触发框选/拖拽
     cap.addEventListener('click', async (ev) => {
       ev.stopPropagation()
@@ -127,7 +126,7 @@ export class ShotOverlay {
     }
     for (const node of nodes) {
       const t = node._spec?.type
-      if (t === 'vision/screenshot' || t === 'const/image' || t === 'vision/preview') {
+      if (t === 'const/image' || t === 'vision/preview' || t === 'mask/create') {
         this._place(node, this.ensure(node))
       }
     }

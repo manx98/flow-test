@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cropperjs": "^1.6.2",
+    "fabric": "^5.5.2",
     "litegraph.js": "^0.7.18",
     "vue": "^3.5.13"
   },
