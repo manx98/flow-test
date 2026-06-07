@@ -26,7 +26,7 @@ def _engine_title(name: str, pkg: str) -> str:
 
 
 # 变量 value 端口可选类型（自定义连接点类型）
-_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE]
+_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE, T.AI]
 
 
 def _p(name, ptype, card="1", required=False, desc=""):
@@ -75,6 +75,8 @@ _SCRIPT_FUNCS = [
     _fn("设备.find_text(text, regex=False, ocr=None, timeout=0)",
         "找文字(OCR)：命中返回 Match，否则 None（等价「找文字」）"),
     _fn("设备.find_all(template, similarity=0.7)", "找全部：返回所有命中的 Match 列表（等价「找全部」）"),
+    _fn("设备.ai_find_image(desc, ai)", "AI 找图：按描述用大模型定位元素，命中返回 Match（等价「AI 找图」）"),
+    _fn("设备.ai_find_text(desc, ai)", "AI 找文字：按语义用大模型定位文字，命中返回 Match（等价「AI 找文字」）"),
     _fn("设备.wait_appear(template, timeout=10, mask=None)", "等出现：出现返回 Match，超时 None（等价「等出现」）"),
     _fn("设备.wait_vanish(template, timeout=10, mask=None)", "等消失：消失 True，超时 False（等价「等消失」）"),
     _fn("设备.click(target, button='left', double=False)", "在点坐标点击；target 可为 Location/Match（等价「点击」）"),
@@ -218,6 +220,36 @@ _NODES = [
                  _p("count", T.NUMBER, desc="命中数量")],
      "properties": [_pr("similarity", "number", 0.7, "相似度阈值（0~1）")]},
 
+    # ===== AI 视觉查找（用大模型按描述定位，返回坐标框）=====
+    {"type": "ai/find_image", "category": "视觉", "title": "AI 找图",
+     "description": "用 AI 视觉大模型按自然语言描述在画面里定位元素/图标，命中走 found 并输出 match(坐标框)，否则 notFound。"
+                    "每次执行调用一次 AI(按量计费)；坐标由模型给出，精度取决于模型。",
+     "script": "ai_find_image(desc, ai)",
+     "inputs": [_exec_in(),
+                _p("video", T.VIDEO, "1", True, desc="查找源画面（来自「设备属性」video）"),
+                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
+                _p("desc", T.TEXT, "1", desc="要定位的元素描述（未接则用 prompt 属性）")],
+     "outputs": [_exec_out("found", "命中分支：定位到目标时走这里"),
+                 _exec_out("notFound", "未命中分支：没定位到时走这里"),
+                 _p("match", T.MATCH, "*", desc="命中坐标框（含置信度）"),
+                 _p("ok", T.BOOL, desc="是否命中")],
+     "properties": [_pr("prompt", "multiline", "", "元素描述（desc 未接时用；支持多行）"),
+                    _pr("min_confidence", "number", 0, "最低置信度（低于则当未命中）")]},
+    {"type": "ai/find_text", "category": "视觉", "title": "AI 找文字",
+     "description": "用 AI 视觉大模型按语义在画面里定位文字，命中走 found 并输出 match(坐标框)，否则 notFound。"
+                    "比 OCR 更能理解模糊/语义描述；每次执行调用一次 AI(按量计费)。",
+     "script": "ai_find_text(desc, ai)",
+     "inputs": [_exec_in(),
+                _p("video", T.VIDEO, "1", True, desc="查找源画面（来自「设备属性」video）"),
+                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
+                _p("desc", T.TEXT, "1", desc="要定位的文字/语义描述（未接则用 prompt 属性）")],
+     "outputs": [_exec_out("found", "命中分支：定位到文字时走这里"),
+                 _exec_out("notFound", "未命中分支：没定位到时走这里"),
+                 _p("match", T.MATCH, "*", desc="命中坐标框（含置信度）"),
+                 _p("ok", T.BOOL, desc="是否命中")],
+     "properties": [_pr("prompt", "multiline", "", "文字/语义描述（desc 未接时用；支持多行）"),
+                    _pr("min_confidence", "number", 0, "最低置信度（低于则当未命中）")]},
+
     # ===== OCR 引擎 =====
     {"type": "ocr/tesseract", "category": "OCR", "title": _engine_title("Tesseract 引擎", "pytesseract"),
      "description": "提供 Tesseract OCR 引擎实例，连到「找文字」的 ocr 输入。需 pytesseract + 系统 tesseract。引擎按配置全局缓存复用。",
@@ -235,6 +267,19 @@ _NODES = [
                     _pr("use_angle_cls", "bool", True, "是否启用方向分类（识别旋转文字）"),
                     _pr("det", "bool", True, "是否启用文字检测（关闭则只识别整图）"),
                     _pr("min_confidence", "number", 0, "最低置信度阈值")]},
+
+    # ===== AI 引擎（OpenAI / Ollama，视觉大模型）=====
+    {"type": "ai/engine", "category": "AI", "title": "AI 引擎",
+     "description": "提供 AI 视觉大模型引擎实例，连到「AI 找图 / AI 找文字」的 ai 输入。用官方 openai SDK，"
+                    "OpenAI 与 Ollama 共用（靠 base_url 区分）。引擎按配置全局缓存复用。需 pip install openai。"
+                    "注意：用 OpenAI 时画面会上传到云端；Ollama 为本地不出网。",
+     "inputs": [], "outputs": [_p("ai", T.AI, "*", desc="AI 引擎实例（连到「AI 找图/找文字」的 ai）")],
+     "properties": [_pr("provider", "enum", "openai", "服务商：openai / ollama / custom（决定默认 base_url）",
+                        options=["openai", "ollama", "custom"]),
+                    _pr("base_url", "string", "", "接口地址（留空按 provider 默认；custom 必填）"),
+                    _pr("model", "string", "gpt-4o", "模型名（OpenAI 如 gpt-4o；Ollama 如 llava、qwen2.5-vl）"),
+                    _pr("api_key", "password", "", "API Key（Ollama 可留空）"),
+                    _pr("temperature", "number", 0, "采样温度（定位建议 0）")]},
 
     # ===== 坐标转换（Match → Point）=====
     {"type": "geom/to_point", "category": "动作", "title": "坐标转换",

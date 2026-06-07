@@ -410,6 +410,55 @@ def _run_find_all(ctx, node):
     return "out"
 
 
+# ---- AI 视觉引擎（构造惰性，按配置全局缓存复用）----
+_AI_CACHE: dict = {}
+
+
+@handler("ai/engine", "eval")
+def _eval_ai_engine(ctx, node):
+    p = ctx.graph.prop
+    key = ("ai", p(node, "provider", "openai"), p(node, "base_url", ""),
+           p(node, "model", "gpt-4o"), p(node, "api_key", ""),
+           float(p(node, "temperature", 0)))
+    eng = _AI_CACHE.get(key)
+    if eng is None:
+        from visauto.ai.engine import AIEngine
+        eng = AIEngine(provider=key[1], base_url=key[2], model=key[3],
+                       api_key=key[4], temperature=key[5])
+        _AI_CACHE[key] = eng
+    return {"ai": eng}
+
+
+def _run_ai_find(ctx, node, kind):
+    dev = _need_dev_in(ctx, node)
+    ai = ctx.get_input(node, "ai")
+    if ai is None:
+        raise RuntimeError("AI 查找未连接「AI 引擎」(ai 输入)")
+    desc = ctx.get_input(node, "desc")
+    if desc in (None, ""):
+        desc = ctx.graph.prop(node, "prompt", "")
+    if not desc:
+        raise RuntimeError("AI 查找缺少描述（连 desc 或填 prompt 属性）")
+    m = dev.ai_locate(desc, ai=ai, kind=kind)
+    minc = float(ctx.graph.prop(node, "min_confidence", 0))
+    if m is not None and getattr(m, "score", 1.0) < minc:
+        m = None
+    ctx.set_output(node, "match", m)
+    ctx.set_output(node, "ok", m is not None)
+    _echo_match(ctx, node, dev, [m] if m is not None else [])
+    return "found" if m is not None else "notFound"
+
+
+@handler("ai/find_image", "run")
+def _run_ai_find_image(ctx, node):
+    return _run_ai_find(ctx, node, "image")
+
+
+@handler("ai/find_text", "run")
+def _run_ai_find_text(ctx, node):
+    return _run_ai_find(ctx, node, "text")
+
+
 # ---- 坐标转换（Match → Point）----
 def _match_to_point(m, anchor="center", dx=0, dy=0):
     """Match → Location：按锚点取矩形位置再加偏移。m 为 None 时返回 None。"""
@@ -585,6 +634,14 @@ class ScriptDevice:
     def find_all(self, template, similarity=0.7):
         """找全部（等价「找全部」）：返回 Match 列表。"""
         return self._dev.find_all(self._pattern(template, similarity))
+
+    def ai_find_image(self, desc, ai):
+        """AI 找图（等价「AI 找图」）：按描述用大模型定位，命中返回 Match，否则 None。"""
+        return self._dev.ai_locate(desc, ai=ai, kind="image")
+
+    def ai_find_text(self, desc, ai):
+        """AI 找文字（等价「AI 找文字」）：按语义用大模型定位，命中返回 Match，否则 None。"""
+        return self._dev.ai_locate(desc, ai=ai, kind="text")
 
     def wait_appear(self, template, timeout=10, mask=None):
         """等出现（等价「等出现」）：出现返回 Match，超时 None。可选 mask 忽略部分区域。"""

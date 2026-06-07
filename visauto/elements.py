@@ -123,6 +123,25 @@ class Region(Element):
         abs_raw = raw.__class__(self.x + raw.x, self.y + raw.y, raw.w, raw.h, raw.score)
         return Match.from_raw(abs_raw, pattern, self._device)
 
+    def ai_locate(self, desc, *, ai, kind: str = "image") -> "Optional[Match]":
+        """用 AI 视觉大模型按描述在本区域画面里定位目标，命中返回 Match，否则 None。
+
+        kind: 'image'(视觉元素) | 'text'(文字)。坐标由模型给出（归一化），换算成绝对像素。
+        """
+        from .ai.engine import build_prompt
+        if ai is None:
+            raise OcrNotConfigured("AI 查找需要传入 ai= 引擎")
+        screen = self._capture()
+        found, box, conf = ai.locate(screen, build_prompt(kind, str(desc)))
+        if not found or box is None:
+            return None
+        h_img, w_img = screen.shape[:2]
+        x = self.x + int(box[0] * w_img)
+        y = self.y + int(box[1] * h_img)
+        w = max(1, int(box[2] * w_img))
+        h = max(1, int(box[3] * h_img))
+        return Match(x, y, w, h, conf, self._device, ocr_text=str(desc))
+
     def _search_text(self, screen, text, regex, ocr, find_all) -> "list[Match]":
         if ocr is None:
             ocr = get_default_ocr()          # 回退到会话默认引擎（GUI 配置）

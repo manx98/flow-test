@@ -262,6 +262,92 @@ function addPasswordWidget(node, prop) {
   return w
 }
 
+// 多行文本属性：节点上显示单行预览（多行/超长加 ⏎…），点开弹出多行编辑框。
+function openMultilineEditor(title, initial, onSave) {
+  const mask = document.createElement('div')
+  Object.assign(mask.style, {
+    position: 'fixed', inset: '0', zIndex: 9999, background: 'rgba(0,0,0,0.5)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  })
+  const onKey = (e) => { if (e.key === 'Escape') close() }
+  const close = () => { try { mask.remove() } catch (_) {} document.removeEventListener('keydown', onKey) }
+  document.addEventListener('keydown', onKey)
+  mask.addEventListener('mousedown', (e) => { if (e.target === mask) close() })
+  const panel = document.createElement('div')
+  Object.assign(panel.style, {
+    width: 'min(560px, 92vw)', background: '#23262b', color: '#e6e6e6', borderRadius: '8px',
+    padding: '14px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    display: 'flex', flexDirection: 'column', gap: '10px',
+    fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+  })
+  panel.addEventListener('mousedown', (e) => e.stopPropagation())
+  const head = document.createElement('div')
+  head.textContent = title; Object.assign(head.style, { fontWeight: '600', color: '#fff' })
+  const ta = document.createElement('textarea')
+  ta.value = initial
+  Object.assign(ta.style, {
+    width: '100%', minHeight: '160px', resize: 'vertical', boxSizing: 'border-box',
+    background: '#0d0d0d', color: '#d4d4d4', border: '1px solid #333', borderRadius: '4px',
+    padding: '8px', font: '13px monospace', outline: 'none', whiteSpace: 'pre-wrap',
+  })
+  const foot = document.createElement('div')
+  Object.assign(foot.style, { display: 'flex', justifyContent: 'flex-end', gap: '8px', alignItems: 'center' })
+  const hint = document.createElement('span')
+  hint.textContent = 'Ctrl+Enter 保存'; Object.assign(hint.style, { marginRight: 'auto', color: '#889', fontSize: '11px' })
+  const cancel = document.createElement('button'); cancel.textContent = '取消'
+  const save = document.createElement('button'); save.textContent = '保存'
+  for (const b of [cancel, save]) Object.assign(b.style, { padding: '4px 12px', cursor: 'pointer', borderRadius: '4px', border: 'none' })
+  Object.assign(save.style, { background: '#2b6cb0', color: '#fff' })
+  Object.assign(cancel.style, { background: '#3a3a3a', color: '#ddd' })
+  cancel.addEventListener('click', close)
+  save.addEventListener('click', () => { onSave(ta.value); close() })
+  ta.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSave(ta.value); close() }
+  })
+  foot.appendChild(hint); foot.appendChild(cancel); foot.appendChild(save)
+  panel.appendChild(head); panel.appendChild(ta); panel.appendChild(foot)
+  mask.appendChild(panel); document.body.appendChild(mask)
+  ta.focus()
+}
+
+function addMultilineWidget(node, prop) {
+  const name = prop.name
+  const w = {
+    name, type: 'multiline', value: prop.default ?? '',
+    options: { property: name },   // 绑定 properties[name]，保证刷新/反序列化回显
+    draw(ctx, node, width, y, H) {
+      if (node.flags && node.flags.collapsed) return
+      const m = 15
+      ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR
+      ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR
+      ctx.beginPath(); ctx.roundRect(m, y, width - m * 2, H, [H * 0.5]); ctx.fill(); ctx.stroke()
+      ctx.save(); ctx.beginPath(); ctx.rect(m, y, width - m * 2, H); ctx.clip()
+      ctx.fillStyle = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR
+      ctx.textAlign = 'left'
+      ctx.fillText(this.label || this.name, m * 2, y + H * 0.7)
+      const raw = String((node.properties && node.properties[this.name]) ?? this.value ?? '')
+      const first = raw.split('\n')[0]
+      const shown = raw.includes('\n') ? first + ' ⏎…' : first
+      ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR
+      ctx.textAlign = 'right'
+      ctx.fillText(shown.substr(0, 30), width - m * 2, y + H * 0.7)
+      ctx.restore()
+    },
+    mouse(event, pos, node) {
+      if (event.type !== LiteGraph.pointerevents_method + 'down') return false
+      const cur = (node.properties && node.properties[this.name]) ?? this.value ?? ''
+      openMultilineEditor(this.label || this.name, cur, (v) => {
+        this.value = v
+        node.properties[this.name] = v
+        node.setDirtyCanvas(true, true)
+      })
+      return true
+    },
+  }
+  node.addCustomWidget(w)
+  return w
+}
+
 function addWidgetFor(node, prop) {
   const set = (v) => { node.properties[prop.name] = v }
   const name = prop.name
@@ -281,6 +367,8 @@ function addWidgetFor(node, prop) {
       node.addWidget('combo', name, prop.default, set, opt({ values: prop.options || [] })); break
     case 'password':
       addPasswordWidget(node, prop); break
+    case 'multiline':
+      addMultilineWidget(node, prop); break
     case 'image':
       break   // 模板图片：无文本框，由上传/粘贴按钮写入
     case 'string':

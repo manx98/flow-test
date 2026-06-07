@@ -9,6 +9,7 @@ pillow
 # pytesseract        # TesseractEngine（另需系统 tesseract 二进制）
 # paddleocr          # PaddleEngine
 # paddlepaddle       # PaddleEngine 运行时
+# openai             # AIEngine（AI 找图/找文字；OpenAI 与 Ollama 共用，惰性导入）
 # pyperclip          # 本地后端 paste 走系统剪贴板
 # websocket-client   # noVNC 后端（RFB over WebSocket）
 # cryptography       # noVNC 的 VNC 密码（DES）认证；服务器免密则不需要
