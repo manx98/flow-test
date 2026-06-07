@@ -44,8 +44,15 @@ class PaddleEngine:
                 "PaddleEngine 需要 paddleocr：pip install paddleocr paddlepaddle"
             ) from e
 
-        # 3.x 关 mkldnn 规避 paddle 3.x 的 oneDNN 推理 bug；按 api_version 选尝试顺序
+        # 3.x 关 mkldnn 规避 paddle 3.x 的 oneDNN 推理 bug；按 api_version 选尝试顺序。
+        # 关掉整图方向判定/去扭曲(PP-OCRv5 默认开)：屏幕画面从不旋转/弯曲，开启反而会把整图
+        # 旋转 90° 并返回旋转坐标系下的框(导致命中坐标与截图错位/转置)。旧版不识别这俩 kwarg
+        # 则退回不带它们的尝试。
+        _noflip = dict(use_doc_orientation_classify=False, use_doc_unwarping=False)
         three = [
+            dict(lang=lang, use_textline_orientation=use_angle_cls, **_noflip,
+                 device=("gpu" if use_gpu else "cpu"), enable_mkldnn=False),
+            dict(lang=lang, use_textline_orientation=use_angle_cls, **_noflip, enable_mkldnn=False),
             dict(lang=lang, use_textline_orientation=use_angle_cls,
                  device=("gpu" if use_gpu else "cpu"), enable_mkldnn=False),
             dict(lang=lang, use_textline_orientation=use_angle_cls, enable_mkldnn=False),

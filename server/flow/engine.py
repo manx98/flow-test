@@ -320,6 +320,7 @@ def _run_wait_appear(ctx, node):
     timeout = float(ctx.graph.prop(node, "timeout", 10))
     m = dev.exists(Pattern(tmpl, mask=mask), timeout=timeout)
     ctx.set_output(node, "match", m)
+    _echo_match(ctx, node, dev, [m] if m is not None else [])
     return "out" if m is not None else "timeout"
 
 
@@ -346,6 +347,7 @@ def _run_find_image(ctx, node):
     m = dev.exists(Pattern(tmpl, similarity=sim, mask=mask), timeout=timeout)
     ctx.set_output(node, "match", m)
     ctx.set_output(node, "ok", m is not None)
+    _echo_match(ctx, node, dev, [m] if m is not None else [])
     return "found" if m is not None else "notFound"
 
 
@@ -359,6 +361,7 @@ def _run_find_text(ctx, node):
     m = dev.exists(text=text, regex=regex, ocr=ocr, timeout=timeout)
     ctx.set_output(node, "match", m)
     ctx.set_output(node, "ok", m is not None)
+    _echo_match(ctx, node, dev, [m] if m is not None else [])
     return "found" if m is not None else "notFound"
 
 
@@ -403,6 +406,7 @@ def _run_find_all(ctx, node):
     ms = dev.find_all(Pattern(tmpl, similarity=sim))
     ctx.set_output(node, "matches", ms)
     ctx.set_output(node, "count", len(ms))
+    _echo_match(ctx, node, dev, ms)
     return "out"
 
 
@@ -700,3 +704,49 @@ def _need_dev_in(ctx, node):
     if dev is None:
         raise RuntimeError(f"节点 {node.get('type')} 未连接设备(video)，请经「设备属性」接入")
     return dev
+
+
+def _echo_match(ctx, node, dev, matches):
+    """抓当前帧并在命中区域画红框，存盘后通知前端在该节点上回显（找图/找文字/等出现用）。
+
+    matches 为 Match 列表（可空）；无命中也回显原帧，便于查看当时画面。失败静默忽略。
+    """
+    sink = ctx.evidence_sink
+    if sink is None or dev is None:
+        return
+    try:
+        import cv2
+        # 用与查找完全相同的取帧方式：_search 用 dev._capture()(=backend.capture(设备区域))，
+        # 命中坐标即相对该帧。某些设备 capture()(全屏 None) 与之朝向/尺寸不一致，会让框落到帧外。
+        frame = dev._capture() if hasattr(dev, "_capture") else dev.capture()
+        ox, oy = int(getattr(dev, "x", 0)), int(getattr(dev, "y", 0))   # 区域原点(命中为绝对坐标)
+        H, W = frame.shape[:2]
+        # 标注画在副本上，再半透明叠加回原帧（alpha），既醒目又不挡住底图。
+        # 线宽随分辨率，并在命中中心画十字(带白描边)，缩小显示仍可见。
+        th = max(1, round(max(W, H) / 700))   # 1920 → ~3px
+        ml = th * 3                           # 十字标记臂长
+        alpha = 0.6                           # 标注不透明度
+        red, white = (0, 0, 255), (255, 255, 255)
+        overlay = frame.copy()
+        drawn = False
+        for m in matches:
+            if m is None:
+                continue
+            drawn = True
+            x, y = int(getattr(m, "x", 0)) - ox, int(getattr(m, "y", 0)) - oy
+            w, h = int(getattr(m, "w", 0)), int(getattr(m, "h", 0))
+            cx, cy = (x + w // 2, y + h // 2) if (w > 0 and h > 0) else (x, y)
+            if w > 0 and h > 0:
+                cv2.rectangle(overlay, (x - th, y - th), (x + w + th, y + h + th), white, th + 2)
+                cv2.rectangle(overlay, (x - th, y - th), (x + w + th, y + h + th), red, th)
+            for (dx, dy) in ((1, 0), (0, 1)):   # 十字：先白后红，任何背景都可见
+                p1, p2 = (cx - dx * ml, cy - dy * ml), (cx + dx * ml, cy + dy * ml)
+                cv2.line(overlay, p1, p2, white, th + 2)
+                cv2.line(overlay, p1, p2, red, th)
+        if drawn:
+            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        ref = sink(node["id"], frame)
+        if ref:
+            ctx.emit({"type": "node_shot", "id": node["id"], "url": ref})
+    except Exception:
+        pass

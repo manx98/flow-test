@@ -126,9 +126,18 @@ export class ShotOverlay {
     }
     for (const node of nodes) {
       const t = node._spec?.type
-      if (t === 'const/image' || t === 'vision/preview' || t === 'mask/create') {
+      // 模板/预览/遮罩常驻显示；其它节点(找图/找文字/等出现的结果回显)仅在已设过图时显示
+      if (t === 'const/image' || t === 'vision/preview' || t === 'mask/create' || this.entries.has(node)) {
         this._place(node, this.ensure(node))
       }
+    }
+  }
+
+  // 清掉结果回显（找图/找文字/等出现的带框图）；保留模板/预览/遮罩。重跑前调用。
+  clearMatches() {
+    const keep = new Set(['const/image', 'vision/preview', 'mask/create'])
+    for (const node of [...this.entries.keys()]) {
+      if (!keep.has(node._spec?.type)) this.remove(node)
     }
   }
 

@@ -425,6 +425,7 @@ function setNodeStatus(id, st, info) {
 function run() {
   if (!current.value || running.value) return
   resetNodeColors()
+  if (shots) shots.clearMatches()   // 清掉上次运行的找图/找文字/等出现结果回显
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const ws = new WebSocket(`${proto}://${location.host}/ws/run/${current.value}`)
   runWs = ws
@@ -437,6 +438,10 @@ function run() {
     const m = JSON.parse(e.data)
     if (m.type === 'node') setNodeStatus(m.id, m.status, m.info)
     else if (m.type === 'alert') showToast(m.message, m.level)
+    else if (m.type === 'node_shot') {   // 找图/找文字/等出现：回显带命中框的画面
+      const n = graph.getNodeById(m.id)
+      if (n) shots.setImage(n, m.url, { fit: true })
+    }
     else if (m.type === 'run' && m.status === 'done') {
       const r = m.report
       status.value = `运行完成：${r.passed ? '✅ 通过' : '❌ 失败 ' + r.failed + '/' + r.total}（${r.duration}s）`
