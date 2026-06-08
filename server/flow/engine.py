@@ -44,6 +44,7 @@ class RunContext:
         self.evaluated: set = set()   # 已 pure 求值的节点
         self.vars: dict = {}
         self.devices: dict = {}       # device_node_id -> Device
+        self.catch_depth = 0           # >0 时节点异常由外层 try/catch 接管，不写入最终报告错误
 
     # ---- data 拉取 ----
     def get_input(self, node, name):
@@ -56,7 +57,22 @@ class RunContext:
             return self.values[key]
         h = HANDLERS.get(src_node["type"])
         if h and "eval" in h and src_node["id"] not in self.evaluated:
-            outs = h["eval"](self, src_node) or {}
+            try:
+                outs = h["eval"](self, src_node) or {}
+            except Exception as e:
+                if not hasattr(e, "_flow_node_id"):
+                    try:
+                        e._flow_node_id = src_node["id"]
+                        e._flow_node_type = src_node.get("type")
+                    except Exception:
+                        pass
+                if self.catch_depth > 0 and not getattr(e, "_flow_reported", False):
+                    self.on_state(src_node["id"], "fail", str(e))
+                    try:
+                        e._flow_reported = True
+                    except Exception:
+                        pass
+                raise
             self.evaluated.add(src_node["id"])
             for nm, val in outs.items():
                 idx = GraphModel.out_slot_index(src_node, nm)
@@ -114,7 +130,13 @@ class RunContext:
     def report_error(self, node_id, exc, evidence=None):
         """在出错的源节点记录错误(报告+标红+消息)，并标记异常已上报，
         使上层链路节点只标红、不重复展示同一条错误。"""
-        self.report.add_error(node_id, str(exc), evidence)
+        if not hasattr(exc, "_flow_node_id"):
+            try:
+                exc._flow_node_id = node_id
+            except Exception:
+                pass
+        if self.catch_depth <= 0:
+            self.report.add_error(node_id, str(exc), evidence)
         self.on_state(node_id, "fail", str(exc))
         try:
             exc._flow_reported = True
@@ -132,8 +154,20 @@ class RunContext:
         except ScriptAborted:
             raise
         except Exception as e:
+            if not hasattr(e, "_flow_node_id"):
+                try:
+                    e._flow_node_id = node["id"]
+                    e._flow_node_type = node.get("type")
+                except Exception:
+                    pass
             if getattr(e, "_flow_reported", False):
                 self.on_state(node["id"], "fail", "")   # 链路标红：错误已由触发节点展示，本层不重复
+            elif self.catch_depth > 0:
+                self.on_state(node["id"], "fail", str(e))
+                try:
+                    e._flow_reported = True
+                except Exception:
+                    pass
             else:
                 self.report_error(node["id"], e, self.capture_evidence(node["id"]))
             raise
@@ -299,6 +333,38 @@ def _run_sequence(ctx, node):
         if slot.get("type") == "exec":
             ctx.run_branch(node, slot.get("name"))
     return None
+
+
+@handler("flow/try_catch", "run")
+def _run_try_catch(ctx, node):
+    caught = None
+    ctx.catch_depth += 1
+    try:
+        ctx.run_branch(node, "try")
+    except ScriptAborted:
+        raise
+    except Exception as e:
+        caught = e
+    finally:
+        ctx.catch_depth -= 1
+
+    if caught is None:
+        return "done"
+
+    ctx.set_output(node, "error", str(caught))
+    ctx.set_output(node, "error_type", type(caught).__name__)
+    ctx.set_output(node, "error_node", getattr(caught, "_flow_node_id", None))
+    ctx.on_state(node["id"], "ok", f"已捕获：{caught}")
+    ctx.run_branch(node, "catch")
+    return "done"
+
+
+@handler("flow/raise", "run")
+def _run_raise(ctx, node):
+    msg = ctx.get_input(node, "message")
+    if msg in (None, ""):
+        msg = ctx.graph.prop(node, "message", "主动抛出异常")
+    raise RuntimeError(str(msg))
 
 
 # ---- 等待 ----
