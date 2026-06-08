@@ -763,6 +763,37 @@ function reconcileInteractions() {
 
 <style>
 html, body, #app { height: 100%; margin: 0; }
+:root {
+  --scrollbar-track: #15171a;
+  --scrollbar-thumb: #4e6572;
+  --scrollbar-thumb-hover: #6f8795;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #6f8795, #3e505c);
+  border: 2px solid var(--scrollbar-track);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--scrollbar-thumb-hover), #526b79);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+textarea, .graphdialog textarea {
+  scrollbar-gutter: stable;
+}
 /* 节点右键菜单需盖过画面区 DOM 覆盖层（脚本编辑器 z-index:45、错误条 60 等），否则会被遮挡 */
 .litegraph.litecontextmenu { z-index: 1000 !important; }
 .app { display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
