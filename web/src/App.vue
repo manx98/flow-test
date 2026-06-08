@@ -138,6 +138,7 @@ import { VideoOverlay } from './graph/video-overlay.js'
 import { ShotOverlay } from './graph/shot-overlay.js'
 import { CodeOverlay } from './graph/code-overlay.js'
 import { ErrorOverlay } from './graph/error-overlay.js'
+import { AgentTraceOverlay } from './graph/agent-overlay.js'
 import { DeviceConnection } from './webrtc/device.js'
 
 const projects = ref([])
@@ -266,6 +267,7 @@ let overlay = null
 let shots = null
 let codes = null
 let errors = null
+let agentTrace = null
 
 onMounted(async () => {
   const catalog = await api.catalog()
@@ -282,6 +284,7 @@ onMounted(async () => {
   shots.setRenameHandler(onRenameImage)
   codes = new CodeOverlay(lgcanvas, overlayEl.value)
   errors = new ErrorOverlay(lgcanvas, overlayEl.value)
+  agentTrace = new AgentTraceOverlay(lgcanvas, overlayEl.value)
   const prevForeground = lgcanvas.onDrawForeground
   lgcanvas.onDrawForeground = function (ctx) {
     prevForeground && prevForeground.call(this, ctx)
@@ -291,6 +294,7 @@ onMounted(async () => {
     shots.update(graph._nodes)   // 截图/模板/预览节点画面 + 裁剪框定位
     codes.update(graph._nodes)   // 脚本节点多行代码编辑器
     errors.update(graph._nodes)  // 运行错误（可选中/可复制）
+    agentTrace.update(graph._nodes)   // Agent 展示节点执行过程
   }
   setDeviceActionHandler(onDeviceAction)
   setCaptureHandler(onCapture)
@@ -426,6 +430,7 @@ function run() {
   if (!current.value || running.value) return
   resetNodeColors()
   if (shots) shots.clearMatches()   // 清掉上次运行的找图/找文字/等出现结果回显
+  if (agentTrace) agentTrace.clearAll()   // 清掉上次 Agent 执行过程
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const ws = new WebSocket(`${proto}://${location.host}/ws/run/${current.value}`)
   runWs = ws
@@ -442,6 +447,7 @@ function run() {
       const n = graph.getNodeById(m.id)
       if (n) shots.setImage(n, m.url, { fit: true })
     }
+    else if (m.type === 'agent_step') agentTrace.onStep(m.id, m)   // Agent 每步过程
     else if (m.type === 'run' && m.status === 'done') {
       const r = m.report
       status.value = `运行完成：${r.passed ? '✅ 通过' : '❌ 失败 ' + r.failed + '/' + r.total}（${r.duration}s）`

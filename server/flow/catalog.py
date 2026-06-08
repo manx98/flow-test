@@ -26,7 +26,7 @@ def _engine_title(name: str, pkg: str) -> str:
 
 
 # 变量 value 端口可选类型（自定义连接点类型）
-_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE, T.AI]
+_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE, T.AI, T.SCRIPT]
 
 
 def _p(name, ptype, card="1", required=False, desc=""):
@@ -77,6 +77,8 @@ _SCRIPT_FUNCS = [
     _fn("设备.find_all(template, similarity=0.7)", "找全部：返回所有命中的 Match 列表（等价「找全部」）"),
     _fn("设备.ai_find_image(desc, ai)", "AI 找图：按描述用大模型定位元素，命中返回 Match（等价「AI 找图」）"),
     _fn("设备.ai_find_text(desc, ai)", "AI 找文字：按语义用大模型定位文字，命中返回 Match（等价「AI 找文字」）"),
+    _fn("设备.ai_agent(goal, ai, max_steps=15)",
+        "AI 计算机操作代理：自主多步操控设备完成 goal，返回 (ok, message, steps)（等价「AI 交互」）"),
     _fn("设备.wait_appear(template, timeout=10, mask=None)", "等出现：出现返回 Match，超时 None（等价「等出现」）"),
     _fn("设备.wait_vanish(template, timeout=10, mask=None)", "等消失：消失 True，超时 False（等价「等消失」）"),
     _fn("设备.click(target, button='left', double=False)", "在点坐标点击；target 可为 Location/Match（等价「点击」）"),
@@ -95,7 +97,9 @@ _SCRIPT_FUNCS = [
 ]
 
 _SCRIPT_INJECTS = [
-    {"name": "devs", "desc": "设备字典：devs['名'] 取设备句柄；每个 device 输入口名(『+ 设备』添加)若是合法标识符也注入同名变量"},
+    {"name": "get_arg(name, default=None)",
+     "desc": "取入参（「Python 执行」上同名入参口的值）；设备/脚本值自动包成 ScriptDevice/可调用（.raw 取原始）"},
+    {"name": "set_result(name, value)", "desc": "设置命名结果，从「Python 执行」上同名 result 输出口输出"},
     {"name": "visauto", "desc": "visauto 模块（Image / Pattern / Location / Region / Match / Key 等）"},
     {"name": "Pattern", "desc": "模板匹配类：Pattern(img, similarity=…, mask=…)"},
     {"name": "vars", "desc": "flow 变量字典（与 get_var/set_var 同一份）"},
@@ -167,6 +171,22 @@ _NODES = [
      "inputs": [_p("device", T.DEVICE, "1", True, desc="要显示并交互的设备")],
      "outputs": [],
      "properties": [], "widget": "video"},
+    {"type": "io/ai_agent", "category": "交互", "title": "AI 交互",
+     "description": "AI 计算机操作代理：给一个自然语言目标，节点用大模型自主多步操控设备（看屏→决定动作→"
+                    "点击/输入/按键/滚动/拖拽→重复）直到完成或达最大步数。每步在节点上回显标注截图并记日志。"
+                    "成功走 done、失败/超步走 failed。⚠ 自主操控有风险，建议对沙箱/虚拟机设备运行，并设好 max_steps。",
+     "script": "ai_agent(goal, ai, max_steps=15)",
+     "inputs": [_exec_in(),
+                _p("device", T.DEVICE, "1", True, desc="被操控的设备（看屏 + 执行动作）"),
+                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
+                _p("goal", T.TEXT, "1", desc="任务目标描述（未接则用 prompt 属性）")],
+     "outputs": [_exec_out("done", "成功分支：模型判定任务完成"),
+                 _exec_out("failed", "失败分支：模型判定失败或超过最大步数"),
+                 _p("result", T.TEXT, "*", desc="模型最终说明/结果"),
+                 _p("ok", T.BOOL, desc="是否成功"),
+                 _p("steps", T.NUMBER, desc="实际执行步数")],
+     "properties": [_pr("prompt", "multiline", "", "任务目标（goal 未接时用；支持多行）"),
+                    _pr("max_steps", "int", 15, "最大步数上限（达上限仍未完成则失败）")]},
 
     # ===== 采集 =====
     {"type": "vision/preview", "category": "视觉", "title": "图片预览",
@@ -280,6 +300,31 @@ _NODES = [
                     _pr("model", "string", "gpt-4o", "模型名（OpenAI 如 gpt-4o；Ollama 如 llava、qwen2.5-vl）"),
                     _pr("api_key", "password", "", "API Key（Ollama 可留空）"),
                     _pr("temperature", "number", 0, "采样温度（定位建议 0）")]},
+    {"type": "agent/tool", "category": "AI", "title": "Agent 工具",
+     "description": "定义一个 agent 工具：name+描述告诉模型这工具干什么；「+ arg」加参数输出口(模型填的值由此喂给实现)、"
+                    "「+ result」加结果输入口(实现产出的值由此返回模型)，每个可单独写描述。exec out 触发实现子流程"
+                    "（通常接「Python 执行」）。输出 tool 句柄供「Agent」收集调用。",
+     "inputs": [],
+     "outputs": [_exec_out("out", "调用时触发：跑工具实现子流程（如接 Python 执行）"),
+                 _p("tool", T.TOOL, "*", desc="工具句柄（连到「Agent」节点）")],
+     "properties": []},
+    {"type": "agent/run", "category": "AI", "title": "Agent",
+     "description": "工具调用代理：给一个任务，模型循环「选工具→填参数→看结果」直到完成或达上限。"
+                    "用「+ 工具」加 tool 输入口，接「Agent 工具」节点。每步发执行事件，可接「Agent 展示」查看过程。"
+                    "成功走 done、失败/超步走 failed。",
+     "inputs": [_exec_in(),
+                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
+                _p("task", T.TEXT, "1", desc="任务描述（未接则用 prompt 属性）")],
+     "outputs": [_exec_out("done", "成功分支：模型判定任务完成"),
+                 _exec_out("failed", "失败分支：模型判定失败或超过最大步数"),
+                 _p("result", T.TEXT, "*", desc="模型最终结果/说明"),
+                 _p("trace", T.TRACE, "*", desc="执行过程句柄（连到「Agent 展示」）")],
+     "properties": [_pr("prompt", "multiline", "", "任务描述（task 未接时用）"),
+                    _pr("max_steps", "int", 10, "最大步数上限")]},
+    {"type": "agent/display", "category": "AI", "title": "Agent 展示",
+     "description": "展示所连「Agent」的执行过程：在节点内滚动显示每步「思考→工具(参数)→结果」。仅前端展示，无输出。",
+     "inputs": [_p("trace", T.TRACE, "1", True, desc="来自「Agent」的 trace 输出")],
+     "outputs": [], "properties": [], "widget": "agent_trace"},
 
     # ===== 坐标转换（Match → Point）=====
     {"type": "geom/to_point", "category": "动作", "title": "坐标转换",
@@ -418,27 +463,36 @@ _NODES = [
      "description": "把每个已连动态端口的值写入同名变量——一次可设多个。「+ 变量」起名加端口（端口名=变量名），「- 变量」选删。",
      "script": "set_var(name, value)",
      "inputs": [_exec_in()], "outputs": [_exec_out()],
-     "properties": [_pr("type", "enum", _VAR_TYPES[0], "新增变量端口的默认类型", options=_VAR_TYPES)]},
+     "properties": []},
     {"type": "var/get", "category": "数据", "title": "取变量",
      "description": "按 name 取变量值输出。type 可切换输出类型（切换后断开不兼容旧连线）；变量名需与「设变量」端口名一致。",
      "script": "get_var(name, default=None)",
      "inputs": [], "outputs": [_p("value", _VAR_TYPES[0], "*", desc="变量值（类型随 type 属性切换）")],
      "properties": [_pr("name", "string", "v", "变量名（与「设变量」端口名一致）"),
                     _pr("type", "enum", _VAR_TYPES[0], "输出值类型", options=_VAR_TYPES)]},
-
     # ===== 脚本/日志 =====
     {"type": "script/python", "category": "脚本", "title": "Python 脚本",
-     "description": "在节点内多行编辑器写 Python（语法高亮 + jedi 补全 + 语法检查）。用「+ 设备」加 device 输入口，"
-                    "每口名=脚本里的设备名(同名句柄, 亦在 devs[名])；设备句柄带 find_image/click/… 方法，详见下方「内置函数」。",
+     "description": "脚本定义（不自己执行）：在多行编辑器写 Python，输出一个 script 句柄，连到「Python 执行」运行。"
+                    "代码里用 get_arg('名') 取入参（设备类入参自动包成 ScriptDevice，带 find_image/click/… 方法）、"
+                    "set_result('名', 值) 设命名结果。入参/结果由「Python 执行」上动态增减的端口提供/接收。",
      "functions": _SCRIPT_FUNCS,
      "injects": _SCRIPT_INJECTS,
-     "inputs": [_exec_in()],
-     "outputs": [_exec_out()],
+     "inputs": [],
+     "outputs": [_p("script", T.SCRIPT, "*", desc="脚本定义句柄（连到「Python 执行」的 script 输入）")],
      "properties": [_pr("code", "code",
-                        "# pc = devs['pc']  # 或直接用同名变量 pc\n"
-                        "# m = pc.find_image('btn.png')\n# if m:\n#     pc.click(to_point(m))\n",
+                        "# pc = get_arg('pc')          # 入参(在「Python 执行」上加同名入参口)\n"
+                        "# m = pc.find_image('btn.png')\n# if m:\n#     pc.click(to_point(m))\n"
+                        "# set_result('ok', m is not None)\n",
                         "Python 代码（节点内编辑器）")],
      "widget": "code"},
+    {"type": "script/exec", "category": "脚本", "title": "Python 执行",
+     "description": "执行一个「Python 脚本」定义：script 接脚本句柄。用「+ 入参」加命名输入口（脚本里 get_arg('名') 取）、"
+                    "「+ result」加命名输出口（脚本里 set_result('名', 值) 写）；运行后把各命名结果从对应口输出，并继续执行流。"
+                    "type 下拉决定新增端口的连接类型。",
+     "inputs": [_exec_in(),
+                _p("script", T.SCRIPT, "1", True, desc="脚本定义句柄（来自「Python 脚本」节点）")],
+     "outputs": [_exec_out()],
+     "properties": []},
     {"type": "util/log", "category": "脚本", "title": "日志",
      "description": "把连入的值打印到运行日志。",
      "script": "log(value, label='')",

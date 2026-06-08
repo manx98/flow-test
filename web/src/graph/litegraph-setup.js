@@ -1,8 +1,9 @@
 // 把 /api/nodes 目录注册成 LiteGraph 节点类型，带类型上色与连线校验。
 import { LiteGraph, LGraphCanvas } from 'litegraph.js'
 import { showNodeHelp } from './help-dialog.js'
+import { openPortEditor, EDITABLE_TYPES } from './port-editor.js'
 
-const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any', DEVICE = 'device'
+const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any', DEVICE = 'device', TOOL = 'tool'
 
 // 类型兼容（与服务端 flow/types.py 一致）
 function compatible(src, dst) {
@@ -36,6 +37,34 @@ export function registerCatalog(catalog) {
   for (const spec of catalog.nodes) {
     registerOne(spec)
   }
+}
+
+// Python 执行 → 一键生成并连接一个 Agent 工具：把 入参 镜像成 arg 输出、result 镜像成 result 输入，
+// 并连好 exec_out→in、arg→入参、result→result。在执行节点左侧新建。
+function createAgentToolForExec(node) {
+  const g = node.graph
+  if (!g) return
+  const tool = LiteGraph.createNode('agent/tool')
+  if (!tool) { alert('未找到 Agent 工具节点类型'); return }
+  g.add(tool)
+  const argInputs = (node.inputs || []).filter((i) => i.type !== EXEC && i.name !== 'script')
+  const resultOutputs = (node.outputs || []).filter((o) => o.type !== EXEC)
+  for (const inp of argInputs) tool.addOutput(inp.name, inp.type)        // 入参 → arg 输出
+  for (const outp of resultOutputs) tool.addInput(outp.name, outp.type)  // result → result 输入
+  tool.size = tool.computeSize()
+  tool.pos = [node.pos[0] - (tool.size[0] || 220) - 70, node.pos[1]]
+  // 连线：tool.out→exec.in；tool.arg→exec.入参；exec.result→tool.result
+  const eOut = tool.findOutputSlot('out'), eIn = node.findInputSlot('in')
+  if (eOut >= 0 && eIn >= 0) tool.connect(eOut, node, eIn)
+  for (const inp of argInputs) {
+    const a = tool.findOutputSlot(inp.name), b = node.findInputSlot(inp.name)
+    if (a >= 0 && b >= 0) tool.connect(a, node, b)
+  }
+  for (const outp of resultOutputs) {
+    const a = node.findOutputSlot(outp.name), b = tool.findInputSlot(outp.name)
+    if (a >= 0 && b >= 0) node.connect(a, tool, b)
+  }
+  node.setDirtyCanvas(true, true)
 }
 
 function registerOne(spec) {
@@ -81,48 +110,12 @@ function registerOne(spec) {
       })
       this._showShot = true
     }
-    // 设变量：动态端口（每个端口=一个变量），一次可设多个；类型取自 type 下拉
-    if (spec.type === 'var/set') {
-      this.addWidget('button', '+ 变量', null, () => {
-        const name = (prompt('变量名') || '').trim()
-        if (!name) return
-        if ((this.inputs || []).some((i) => i.name === name)) { alert('变量名重复'); return }
-        this.addInput(name, this.properties.type)
-        this.setDirtyCanvas(true, true)
-      })
-      this.addWidget('button', '- 变量', null, (w, canvas, node, pos, event) => {
-        const names = (this.inputs || []).filter((i) => i.type !== 'exec').map((i) => i.name)
-        if (!names.length) return
-        new LiteGraph.ContextMenu(names, {
-          event, title: '删除变量',
-          callback: (name) => {
-            const slot = this.findInputSlot(name)
-            if (slot >= 0) { this.removeInput(slot); this.setDirtyCanvas(true, true) }
-          },
-        })
-      })
-    }
-    // 顺序：动态增减 exec 出口（出口按槽位顺序依次执行）
-    if (spec.type === 'flow/sequence') {
-      const execOuts = () => (this.outputs || []).filter((o) => o.type === EXEC)
-      this.addWidget('button', '+ 出口', null, () => {
-        const nums = execOuts().map((o) => parseInt(o.name, 10)).filter((n) => !isNaN(n))
-        this.addOutput(String((nums.length ? Math.max(...nums) : 0) + 1), EXEC)
-        this.setDirtyCanvas(true, true)
-      })
-      this.addWidget('button', '- 出口', null, (w, canvas, node, pos, event) => {
-        const names = execOuts().map((o) => o.name)
-        if (names.length <= 1) return   // 至少保留一个出口
-        new LiteGraph.ContextMenu(names, {
-          event, title: '删除出口',
-          callback: (name) => {
-            const slot = this.findOutputSlot(name)
-            if (slot >= 0) { this.removeOutput(slot); this.setDirtyCanvas(true, true) }
-          },
-        })
-      })
+    // 动态端口节点：卡片上只放一个「编辑」按钮，点开用弹窗批量增删改端口/描述
+    if (EDITABLE_TYPES.has(spec.type)) {
+      this.addWidget('button', '✎ 编辑', null, () => openPortEditor(this))
     }
     // 取变量：value 连接点类型随 type 属性切换（自定义连接点类型）
+    // 取变量：value 输出连接点类型随 type 属性切换
     if (spec.type === 'var/get') {
       const isSet = false
       this._applyVarType = () => {
@@ -160,40 +153,27 @@ function registerOne(spec) {
       this.onPropertyChanged = function (name) { if (name === 'type') this._applyVarType() }
       this._applyVarType()
     }
-    // 脚本节点：动态增减命名 device 输入（每口名=脚本里的设备名），并嵌多行代码编辑器
-    if (spec.type === 'script/python') {
-      this.addWidget('button', '+ 设备', null, () => {
-        const name = (prompt('设备名（脚本里用，需合法标识符才注入同名变量）') || '').trim()
-        if (!name) return
-        if ((this.inputs || []).some((i) => i.name === name)) { alert('名称重复'); return }
-        this.addInput(name, DEVICE)
-        this.setDirtyCanvas(true, true)
-      })
-      this.addWidget('button', '- 设备', null, (w, canvas, node, pos, event) => {
-        const names = (this.inputs || []).filter((i) => i.type === DEVICE).map((i) => i.name)
-        if (!names.length) return
-        new LiteGraph.ContextMenu(names, {
-          event, title: '删除设备',
-          callback: (name) => {
-            const slot = this.findInputSlot(name)
-            if (slot >= 0) { this.removeInput(slot); this.setDirtyCanvas(true, true) }
-          },
-        })
-      })
-      this._showCode = true
-    }
+    // 脚本定义节点：仅嵌多行代码编辑器（入参经 get_arg 取，无设备/参数输入口）
+    if (spec.type === 'script/python') this._showCode = true
+    if (spec.type === 'agent/display') this._showAgentTrace = true
     this.size = this.computeSize()
     if (this._showVideo || this._showShot) this.size[1] = Math.max(this.size[1], 220)
     if (this._showCode) { this.size[0] = Math.max(this.size[0], 300); this.size[1] = Math.max(this.size[1], 200) }
+    if (this._showAgentTrace) { this.size[0] = Math.max(this.size[0], 320); this.size[1] = Math.max(this.size[1], 200) }
   }
   NodeClass.title = spec.title
   NodeClass.desc = spec.type
   // 右键菜单顶部加「📖 组件说明」：弹窗展示描述 + 出入参 + 属性
   NodeClass.prototype.getExtraMenuOptions = function () {
-    return [
+    const opts = [
       { content: '📖 组件说明', callback: () => showNodeHelp(this._spec, CATALOG && CATALOG.types) },
-      null,
     ]
+    // Python 执行：一键生成并连接一个 Agent 工具（镜像入参/result 端口）
+    if (spec.type === 'script/exec') {
+      opts.push({ content: '🛠 生成 Agent 工具', callback: () => createAgentToolForExec(this) })
+    }
+    opts.push(null)
+    return opts
   }
   // 连线类型校验：拒绝不兼容
   NodeClass.prototype.onConnectInput = function (targetSlot, type, output) {

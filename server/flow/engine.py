@@ -459,6 +459,65 @@ def _run_ai_find_text(ctx, node):
     return _run_ai_find(ctx, node, "text")
 
 
+def _echo_agent_step(ctx, node, frame, target):
+    """AI 交互每步回显：在 AI 看到的帧上标注本步落点（点击/滚动点），推 node_shot。"""
+    sink = ctx.evidence_sink
+    if sink is None or frame is None:
+        return
+    try:
+        import cv2
+        out = frame
+        if target is not None:
+            H, W = frame.shape[:2]
+            th = max(1, round(max(W, H) / 700))
+            ml = th * 6
+            cx, cy = int(target[0]), int(target[1])
+            red, white = (0, 0, 255), (255, 255, 255)
+            overlay = frame.copy()
+            cv2.circle(overlay, (cx, cy), ml, red, th)
+            for (dx, dy) in ((1, 0), (0, 1)):
+                p1, p2 = (cx - dx * ml, cy - dy * ml), (cx + dx * ml, cy + dy * ml)
+                cv2.line(overlay, p1, p2, white, th + 2)
+                cv2.line(overlay, p1, p2, red, th)
+            out = frame.copy()
+            cv2.addWeighted(overlay, 0.6, out, 0.4, 0, out)
+        ref = sink(node["id"], out)
+        if ref:
+            ctx.emit({"type": "node_shot", "id": node["id"], "url": ref})
+    except Exception:
+        pass
+
+
+@handler("io/ai_agent", "run")
+def _run_ai_agent(ctx, node):
+    dev = ctx.get_input(node, "device")
+    if dev is None:
+        raise RuntimeError("AI 交互未连接设备(device 输入)")
+    ai = ctx.get_input(node, "ai")
+    if ai is None:
+        raise RuntimeError("AI 交互未连接「AI 引擎」(ai 输入)")
+    goal = ctx.get_input(node, "goal")
+    if goal in (None, ""):
+        goal = ctx.graph.prop(node, "prompt", "")
+    if not goal:
+        raise RuntimeError("AI 交互缺少目标（连 goal 或填 prompt 属性）")
+    max_steps = int(ctx.graph.prop(node, "max_steps", 15))
+
+    from visauto.ai.agent import _action_brief
+
+    def on_step(step, action, screen, target):
+        _echo_agent_step(ctx, node, screen, target)
+        if action.get("action") != "finish":
+            ctx.report.log(f"[AI第{step}步] {action.get('reasoning', '')} → {_action_brief(action)}")
+
+    ok, msg, steps = dev.ai_agent(goal, ai=ai, max_steps=max_steps, on_step=on_step)
+    ctx.report.log(f"[AI交互] {'完成' if ok else '失败'}（{steps}步）：{msg}")
+    ctx.set_output(node, "result", msg)
+    ctx.set_output(node, "ok", ok)
+    ctx.set_output(node, "steps", steps)
+    return "done" if ok else "failed"
+
+
 # ---- 坐标转换（Match → Point）----
 def _match_to_point(m, anchor="center", dx=0, dy=0):
     """Match → Location：按锚点取矩形位置再加偏移。m 为 None 时返回 None。"""
@@ -643,6 +702,10 @@ class ScriptDevice:
         """AI 找文字（等价「AI 找文字」）：按语义用大模型定位，命中返回 Match，否则 None。"""
         return self._dev.ai_locate(desc, ai=ai, kind="text")
 
+    def ai_agent(self, goal, ai, max_steps=15):
+        """AI 计算机操作代理（等价「AI 交互」）：自主多步操控完成 goal，返回 (ok, message, steps)。"""
+        return self._dev.ai_agent(goal, ai=ai, max_steps=max_steps)
+
     def wait_appear(self, template, timeout=10, mask=None):
         """等出现（等价「等出现」）：出现返回 Match，超时 None。可选 mask 忽略部分区域。"""
         return self._dev.exists(self._pattern(template, mask=mask), timeout=timeout)
@@ -680,6 +743,25 @@ class ScriptDevice:
         self._dev.mouse.drag_drop(sx, sy, dx, dy)
 
 
+class _ScriptCallable:
+    """脚本里拿到的另一个脚本模块：可调用。helper(x=1) 用 kwargs 作入参运行，返回其 set_result 值。"""
+
+    def __init__(self, ctx, node, sdef):
+        self._ctx, self._node, self._def = ctx, node, sdef
+
+    def __call__(self, **kwargs):
+        return self._def.run(self._ctx, self._node, kwargs)
+
+
+def _wrap(ctx, node, value):
+    """脚本里取值的统一包装：设备→ScriptDevice，脚本定义→可调用，其余原样。"""
+    if isinstance(value, visauto.Device):
+        return ScriptDevice(value)
+    if isinstance(value, ScriptDef):
+        return _ScriptCallable(ctx, node, value)
+    return value
+
+
 class ScriptGlobals:
     """脚本里设备无关的全局函数。"""
 
@@ -715,44 +797,151 @@ class ScriptGlobals:
         self._ctx.report.log(f"[提示] {message}")
 
     def get_var(self, name, default=None):
-        """取变量（等价「取变量」）。"""
-        return self._ctx.vars.get(name, default)
+        """取变量（等价「取变量」）。设备/脚本值自动包装为 ScriptDevice/可调用。"""
+        return _wrap(self._ctx, self._node, self._ctx.vars.get(name, default))
 
     def set_var(self, name, value):
         """设变量（等价「设变量」）。"""
         self._ctx.vars[name] = value
 
 
-@handler("script/python", "run")
-def _run_script(ctx, node):
-    code = ctx.graph.prop(node, "code", "")
-    g = ScriptGlobals(ctx, node)
-    # 动态命名 device 输入：每个口名 → 设备句柄（devs[名]，合法标识符再注入同名变量）
-    devs: dict = {}
+class ScriptDef:
+    """脚本定义：持有代码；由「Python 执行」用入参调用，代码内 get_arg/set_result 交互。"""
+
+    def __init__(self, code: str):
+        self.code = code
+
+    def run(self, ctx, node, args: dict) -> dict:
+        """用 args 执行脚本，返回命名结果字典 {名: 值}（set_result 设置）。"""
+        g = ScriptGlobals(ctx, node)
+        results: dict = {}
+
+        def get_arg(name, default=None):
+            # 设备→ScriptDevice、脚本→可调用模块，其余原样
+            return _wrap(ctx, node, args.get(name, default))
+
+        def set_result(name, value):
+            results[name] = value
+
+        ns = {
+            "visauto": visauto,
+            "Pattern": Pattern,
+            "vars": ctx.vars,
+            "get_arg": get_arg,
+            "set_result": set_result,
+            # 设备无关的全局函数
+            "image": g.image,
+            "to_point": g.to_point,
+            "delay": g.delay,
+            "log": g.log,
+            "alert": g.alert,
+            "get_var": g.get_var,
+            "set_var": g.set_var,
+        }
+        exec(compile(self.code, "<script-node>", "exec"), ns)
+        return results
+
+
+@handler("script/python", "eval")
+def _eval_script_def(ctx, node):
+    # 脚本定义节点：只输出一个可调用的脚本句柄，不自己执行
+    return {"script": ScriptDef(ctx.graph.prop(node, "code", ""))}
+
+
+@handler("script/exec", "run")
+def _run_script_exec(ctx, node):
+    sdef = ctx.get_input(node, "script")
+    if sdef is None:
+        raise RuntimeError("Python 执行未连接「Python 脚本」(script 输入)")
+    # 动态命名入参口 → args（排除 exec 与 script 定义口本身；script 类型的「参数」口仍纳入）
+    args = {}
     for slot in node.get("inputs") or []:
-        if slot.get("type") == "device":
-            d = ctx.get_input(node, slot.get("name"))
-            if d is not None:
-                devs[slot["name"]] = ScriptDevice(d)
-    ns = {
-        "visauto": visauto,
-        "Pattern": Pattern,
-        "vars": ctx.vars,
-        "devs": devs,
-        # 设备无关的全局函数
-        "image": g.image,
-        "to_point": g.to_point,
-        "delay": g.delay,
-        "log": g.log,
-        "alert": g.alert,
-        "get_var": g.get_var,
-        "set_var": g.set_var,
-    }
-    for name, sd in devs.items():
-        if name.isidentifier() and name not in ns:
-            ns[name] = sd
-    exec(compile(code, "<script-node>", "exec"), ns)
+        if slot.get("type") != "exec" and slot.get("name") != "script":
+            args[slot["name"]] = ctx.get_input(node, slot["name"])
+    results = sdef.run(ctx, node, args)
+    for slot in node.get("outputs") or []:
+        if slot.get("type") != "exec":
+            ctx.set_output(node, slot["name"], results.get(slot["name"]))
     return "out"
+
+
+class ToolDef:
+    """agent 工具定义。invoke(ctx, args)：把参数写进 arg 输出口 → 触发 exec out 跑实现子流程
+    → 读 result 输入口返回 {名:值}。供「Agent」节点按 name/description/args/results 调用。"""
+
+    def __init__(self, node, name, description, args, results):
+        self.node = node
+        self.name = name
+        self.description = description
+        self.args = args          # [{name, type, desc}]
+        self.results = results    # [{name, type, desc}]
+
+    def invoke(self, ctx, arg_values: dict):
+        for a in self.args:
+            ctx.set_output(self.node, a["name"], arg_values.get(a["name"]))
+        ctx.run_branch(self.node, "out")
+        return {r["name"]: ctx.get_input(self.node, r["name"]) for r in self.results}
+
+
+@handler("agent/tool", "eval")
+def _eval_agent_tool(ctx, node):
+    p = ctx.graph.prop
+    adescs = p(node, "argDescs", {}) or {}
+    rdescs = p(node, "resultDescs", {}) or {}
+    args = [{"name": s["name"], "type": s["type"], "desc": adescs.get(s["name"], "")}
+            for s in (node.get("outputs") or []) if s.get("type") not in ("exec", "tool")]
+    results = [{"name": s["name"], "type": s["type"], "desc": rdescs.get(s["name"], "")}
+               for s in (node.get("inputs") or []) if s.get("type") != "exec"]
+    return {"tool": ToolDef(node, p(node, "name", "tool"), p(node, "description", ""), args, results)}
+
+
+@handler("agent/run", "run")
+def _run_agent(ctx, node):
+    ai = ctx.get_input(node, "ai")
+    if ai is None:
+        raise RuntimeError("Agent 未连接「AI 引擎」(ai 输入)")
+    task = ctx.get_input(node, "task")
+    if task in (None, ""):
+        task = ctx.graph.prop(node, "prompt", "")
+    if not task:
+        raise RuntimeError("Agent 缺少任务（连 task 或填 prompt 属性）")
+    max_steps = int(ctx.graph.prop(node, "max_steps", 10))
+    # 收集 tool 输入口 → ToolDef + 给模型的 schema
+    tools, schema = {}, []
+    for slot in node.get("inputs") or []:
+        if slot.get("type") == "tool":
+            td = ctx.get_input(node, slot["name"])
+            if td is not None:
+                tools[td.name] = td
+                schema.append({"name": td.name, "description": td.description,
+                               "args": td.args, "results": td.results})
+
+    def _emit(step, **kw):
+        ctx.emit({"type": "agent_step", "id": node["id"], "step": step, **kw})
+
+    history, ok, result = [], False, ""
+    for step in range(1, max_steps + 1):
+        check_abort()
+        action = ai.next_tool_action(task, schema, "\n".join(history) or "(none)")
+        reasoning = str(action.get("reasoning", ""))
+        if action.get("action") == "finish":
+            ok = bool(action.get("success"))
+            result = str(action.get("result", ""))
+            _emit(step, reasoning=reasoning, finish=True, success=ok, result=result)
+            ctx.report.log(f"[Agent第{step}步] {reasoning} → finish(success={ok}): {result}")
+            break
+        tname = action.get("tool")
+        args = action.get("args") or {}
+        td = tools.get(tname)
+        res = {"error": f"未知工具 {tname}"} if td is None else td.invoke(ctx, args)
+        _emit(step, reasoning=reasoning, tool=str(tname), args=str(args), result=str(res))
+        ctx.report.log(f"[Agent第{step}步] {reasoning} → {tname}({args}) = {res}")
+        history.append(f"{step}. {reasoning} -> {tname}({args}) = {res}")
+    else:
+        result = f"超过最大步数 {max_steps}"
+        ctx.report.log(f"[Agent] 失败：{result}")
+    ctx.set_output(node, "result", result)
+    return "done" if ok else "failed"
 
 
 def _need_dev_in(ctx, node):

@@ -142,6 +142,17 @@ class Region(Element):
         h = max(1, int(box[3] * h_img))
         return Match(x, y, w, h, conf, self._device, ocr_text=str(desc))
 
+    def ai_agent(self, goal, *, ai, max_steps: int = 15, on_step=None):
+        """AI 计算机操作代理：用大模型看屏并自动执行多步动作完成 goal。
+
+        返回 (ok: bool, message: str, steps: int)。on_step(step, action, screen, target_xy)
+        每步回调（回显/日志用）。中止经 check_abort 协作式响应。
+        """
+        from .ai.agent import run_agent
+        if ai is None:
+            raise OcrNotConfigured("AI 代理需要传入 ai= 引擎")
+        return run_agent(self, goal, ai=ai, max_steps=max_steps, on_step=on_step)
+
     def _search_text(self, screen, text, regex, ocr, find_all) -> "list[Match]":
         if ocr is None:
             ocr = get_default_ocr()          # 回退到会话默认引擎（GUI 配置）

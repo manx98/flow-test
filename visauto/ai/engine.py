@@ -32,6 +32,38 @@ _SYS = (
 )
 
 
+# 计算机操作代理：每步只出一个动作，坐标归一化 [0,1]
+_AGENT_SYS = (
+    "You are a computer-use agent controlling a PC by looking at screenshots and issuing "
+    "ONE action at a time to accomplish the user's goal. Coordinates are NORMALIZED floats "
+    "in [0,1] relative to the screenshot (x from left edge, y from top edge). "
+    "Respond with ONLY a compact JSON object, no prose, no code fences:\n"
+    '{"reasoning": "...", "action": "<name>", ...params}\n'
+    "Available actions and params:\n"
+    '- {"action":"click","x":f,"y":f,"button":"left|right","double":true|false}\n'
+    '- {"action":"type","text":"..."}\n'
+    '- {"action":"key","keys":"enter" | "tab" | "ctrl+c" | "ctrl+shift+t"}\n'
+    '- {"action":"scroll","x":f,"y":f,"dy":int}   # dy<0 scroll down, dy>0 scroll up\n'
+    '- {"action":"drag","x1":f,"y1":f,"x2":f,"y2":f}\n'
+    '- {"action":"wait","seconds":f}\n'
+    '- {"action":"finish","success":true|false,"message":"short result"}\n'
+    "Do EXACTLY ONE action per step. Use finish when the goal is achieved or impossible."
+)
+
+
+# 工具调用代理：看任务+可用工具，每步选一个工具调用或 finish
+_TOOL_AGENT_SYS = (
+    "You are a task-completion agent. You accomplish the user's task by calling tools, "
+    "one at a time. You are given the task and a JSON list of available tools (each with "
+    "name, description, args, results). Respond with ONLY a compact JSON object, no prose, "
+    "no code fences:\n"
+    '- Call a tool: {"reasoning":"...", "action":"call", "tool":"<name>", "args":{<argname>:<value>,...}}\n'
+    '- Finish:      {"reasoning":"...", "action":"finish", "success":true|false, "result":"<final result>"}\n'
+    "Call exactly one tool per step. After each call you will see its results in the history. "
+    "Use finish when the task is done or cannot proceed."
+)
+
+
 def build_prompt(kind: str, desc: str) -> str:
     """按查找类型生成用户提示词。kind: 'image'(视觉元素) | 'text'(文字)。"""
     if kind == "text":
@@ -98,6 +130,55 @@ class AIEngine:
         )
         content = (resp.choices[0].message.content or "").strip()
         return _parse(content)
+
+    def next_action(self, image_bgr: "np.ndarray", goal: str, history: str = "") -> dict:
+        """计算机操作代理：看当前画面，返回下一步动作 dict（见 _AGENT_SYS 协议）。"""
+        data_url = _to_data_url(image_bgr)
+        user = (f"Goal: {goal}\n\nActions so far:\n{history or '(none)'}\n\n"
+                f"Here is the current screen. Decide the next single action.")
+        resp = self._client.chat.completions.create(
+            model=self.model,
+            temperature=self.temperature,
+            messages=[
+                {"role": "system", "content": _AGENT_SYS},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]},
+            ],
+        )
+        content = (resp.choices[0].message.content or "").strip()
+        obj = _extract_json(content)
+        if not obj or "action" not in obj:
+            raise VisautoError(f"AI 代理：无法解析动作 JSON：{content[:200]}")
+        return obj
+
+    def next_tool_action(self, task: str, tools: list, history: str = "") -> dict:
+        """工具调用代理：看任务+工具清单，返回下一步动作 dict（见 _TOOL_AGENT_SYS）。"""
+        user = (f"Task: {task}\n\nAvailable tools (JSON):\n{json.dumps(tools, ensure_ascii=False)}\n\n"
+                f"Steps so far:\n{history or '(none)'}\n\nDecide the next action.")
+        resp = self._client.chat.completions.create(
+            model=self.model, temperature=self.temperature,
+            messages=[{"role": "system", "content": _TOOL_AGENT_SYS},
+                      {"role": "user", "content": user}],
+        )
+        content = (resp.choices[0].message.content or "").strip()
+        obj = _extract_json(content)
+        if not obj or "action" not in obj:
+            raise VisautoError(f"Agent：无法解析动作 JSON：{content[:200]}")
+        return obj
+
+
+def _extract_json(content: str):
+    """从模型文本里抽取第一个 JSON 对象（容忍代码围栏/前后缀文字）。失败返回 None。"""
+    text = re.sub(r"^```(?:json)?|```$", "", content.strip(), flags=re.MULTILINE).strip()
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
 
 
 def _parse(content: str):
