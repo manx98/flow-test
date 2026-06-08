@@ -1,25 +1,29 @@
-# —— 核心（必需）——
+# —— flow-test 服务端 + visauto 核心（必需）——
+fastapi
+uvicorn[standard]
+python-multipart  # FastAPI 图片上传
+aiortc            # WebRTC（视频 + DataChannel）
+av                # WebRTC 帧编码
+websockets        # WebSocket/异步通信依赖
+reportlab         # 测试报告 PDF 导出
+jedi              # 服务端脚本代码补全
+
 numpy
 opencv-python        # 测试/无界面环境可改用 opencv-python-headless
+pillow
 mss                  # 本地截屏
 pynput               # 本地鼠标键盘
-pillow
+websocket-client     # noVNC 后端（RFB over WebSocket）
+aardwolf             # RDP/xrdp 后端
+pyvmomi              # VMware 控制台/设备节点
 
 # —— 可选附加（按需安装；OCR 引擎惰性导入，不装不影响其余功能）——
-# pytesseract        # TesseractEngine（另需系统 tesseract 二进制）
-# paddleocr          # PaddleEngine
-# paddlepaddle       # PaddleEngine 运行时
-# openai             # AIEngine（AI 找图/找文字；OpenAI 与 Ollama 共用，惰性导入）
+pytesseract        # TesseractEngine（另需系统 tesseract 二进制）
+paddleocr          # PaddleEngine
+paddlepaddle       # PaddleEngine 运行时
+openai             # AIEngine（AI 找图/找文字；OpenAI 与 Ollama 共用，惰性导入）
 # pyperclip          # 本地后端 paste 走系统剪贴板
-# websocket-client   # noVNC 后端（RFB over WebSocket）
-# cryptography       # noVNC 的 VNC 密码（DES）认证；服务器免密则不需要
-# aardwolf           # RDP/xrdp 后端（自带 cryptography 等传递依赖）
-
-# —— GUI 客户端 visauto_ui（按需；qt.py 兼容层自动适配 PyQt5/PyQt6）——
-# PyQt5              # 推荐：Qt5 无需系统库 libxcb-cursor0
-# QScintilla         # PyQt5 的代码编辑器
-# 或改用 PyQt6 + PyQt6-QScintilla（Qt6.5+ 在 Ubuntu 24.04 需 apt 装 libxcb-cursor0）
-# jedi               # 编辑器语义补全（缺失则退回静态词库，不影响运行）
+cryptography       # noVNC 的 VNC 密码（DES）认证；服务器免密则不需要
 
 # —— 开发/测试 ——
 pytest

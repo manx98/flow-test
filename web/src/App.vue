@@ -11,7 +11,7 @@
       <button @click="run" :disabled="!current || running">▶ 运行</button>
       <button @click="stop" :disabled="!running">■ 停止</button>
       <button @click="openHistory" :disabled="!current">运行历史</button>
-      <button @click="locateGraph" title="居中适配所有节点">⊹ 定位</button>
+      <button class="locate-btn" @click="locateGraph" title="居中适配所有节点">定位</button>
       <template v-if="lastResult">
         <a v-if="lastResult.pdf_url" :href="lastResult.pdf_url" target="_blank" class="dl">报告PDF</a>
         <a :href="lastResult.report_url" target="_blank" class="dl">JSON</a>
@@ -798,7 +798,16 @@ textarea, .graphdialog textarea {
 .litegraph.litecontextmenu { z-index: 1000 !important; }
 .app { display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
 .toolbar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: #2b2b2b; color: #eee; }
-.toolbar select, .toolbar button { padding: 3px 8px; }
+.toolbar select, .toolbar button {
+  box-sizing: border-box;
+  height: 26px;
+  padding: 3px 8px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.toolbar .locate-btn {
+  min-width: 44px;
+}
 .toolbar .dl { color: #6cf; font-size: 12px; text-decoration: underline; }
 .toolbar .status { margin-left: auto; color: #9c9; font-size: 12px; }
 .body { display: flex; flex: 1; min-height: 0; }
