@@ -11,6 +11,7 @@
       <button @click="run" :disabled="!current || running">▶ 运行</button>
       <button @click="stop" :disabled="!running">■ 停止</button>
       <button @click="openHistory" :disabled="!current">运行历史</button>
+      <button @click="openSettings" :disabled="!current">设置</button>
       <button class="locate-btn" @click="locateGraph" title="居中适配所有节点">定位</button>
       <template v-if="lastResult">
         <a v-if="lastResult.pdf_url" :href="lastResult.pdf_url" target="_blank" class="dl">报告PDF</a>
@@ -73,6 +74,26 @@
             <span class="spacer"></span>
             <button @click="closeMask">取消</button>
             <button class="primary" @click="saveMask">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="showSettings" class="settings-modal" @mousedown.self="closeSettings">
+        <div class="settings-dialog">
+          <div class="settings-head">连接设置</div>
+          <div class="settings-body">
+            <label>
+              <span>RDP 握手超时</span>
+              <input type="number" min="5" max="300" step="5" v-model.number="settingsDraft.rdp_connect_timeout" />
+            </label>
+            <label>
+              <span>RDP 首帧超时</span>
+              <input type="number" min="5" max="300" step="5" v-model.number="settingsDraft.rdp_first_update_timeout" />
+            </label>
+          </div>
+          <div class="settings-foot">
+            <button @click="closeSettings">取消</button>
+            <button class="primary" @click="saveSettings">保存</button>
           </div>
         </div>
       </div>
@@ -144,6 +165,14 @@ import { DeviceConnection } from './webrtc/device.js'
 const projects = ref([])
 const current = ref('')
 const status = ref('')
+const projectMeta = ref({})
+const DEFAULT_TIMEOUT_SETTINGS = {
+  rdp_connect_timeout: 60,
+  rdp_first_update_timeout: 30,
+}
+const timeoutSettings = ref({ ...DEFAULT_TIMEOUT_SETTINGS })
+const settingsDraft = ref({ ...DEFAULT_TIMEOUT_SETTINGS })
+const showSettings = ref(false)
 
 // 组件栏（侧边可折叠节点面板）
 const paletteOpen = ref(true)
@@ -336,8 +365,61 @@ async function openProject() {
   }
   const data = await api.loadFlow(current.value)
   graph.configure(data)
+  await loadProjectMeta()
+  applyRdpTimeoutsToNodes(timeoutSettings.value)
   reloadShots()
   status.value = `已打开 ${current.value}`
+}
+
+async function loadProjectMeta() {
+  try {
+    projectMeta.value = await api.loadMeta(current.value)
+  } catch (_) {
+    projectMeta.value = {}
+  }
+  timeoutSettings.value = normalizeTimeoutSettings(projectMeta.value.timeouts)
+}
+
+function normalizeTimeoutSettings(raw = {}) {
+  return {
+    rdp_connect_timeout: clampTimeout(raw.rdp_connect_timeout, DEFAULT_TIMEOUT_SETTINGS.rdp_connect_timeout),
+    rdp_first_update_timeout: clampTimeout(raw.rdp_first_update_timeout, DEFAULT_TIMEOUT_SETTINGS.rdp_first_update_timeout),
+  }
+}
+
+function clampTimeout(value, fallback) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(300, Math.max(5, n))
+}
+
+function openSettings() {
+  settingsDraft.value = { ...timeoutSettings.value }
+  showSettings.value = true
+}
+
+function closeSettings() {
+  showSettings.value = false
+}
+
+async function saveSettings() {
+  const next = normalizeTimeoutSettings(settingsDraft.value)
+  timeoutSettings.value = next
+  projectMeta.value = { ...projectMeta.value, timeouts: next }
+  await api.saveMeta(current.value, projectMeta.value)
+  applyRdpTimeoutsToNodes(next)
+  showSettings.value = false
+  status.value = '设置已保存'
+}
+
+function applyRdpTimeoutsToNodes(settings) {
+  if (!graph) return
+  for (const node of graph._nodes || []) {
+    if (node._spec?.type !== 'device/rdp' || node._conn || node._connecting) continue
+    node.setProperty('connect_timeout', settings.rdp_connect_timeout)
+    node.setProperty('first_update_timeout', settings.rdp_first_update_timeout)
+  }
+  lgcanvas && lgcanvas.setDirty(true, true)
 }
 
 // 工程打开后，把模板图片 / 遮罩节点的图重新载入回显。
@@ -487,10 +569,15 @@ async function onDeviceAction(node) {
   }
   const kind = node._spec.type.split('/')[1] // device/local -> local
   const conn = new DeviceConnection()
+  const config = { ...node.properties }
+  if (kind === 'rdp') {
+    config.connect_timeout = timeoutSettings.value.rdp_connect_timeout
+    config.first_update_timeout = timeoutSettings.value.rdp_first_update_timeout
+  }
   node.setDeviceConnectionState ? node.setDeviceConnectionState({ connecting: true }) : (node._connecting = true)
   status.value = '连接中…'
   try {
-    const dev = await conn.connect(kind, { ...node.properties }, current.value, node.id)
+    const dev = await conn.connect(kind, config, current.value, node.id)
     node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn, connecting: false }) : (node._conn = conn)
     reconcileInteractions()        // 挂载到已连线的交互节点
     status.value = `已连接 ${kind} ${dev.width}x${dev.height}`
@@ -891,4 +978,18 @@ textarea, .graphdialog textarea {
   padding: 3px 6px; }
 .crop-foot button { padding: 4px 12px; }
 .crop-foot .primary { background: #2b6cb0; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+
+/* 工程设置 */
+.settings-modal { position: absolute; inset: 0; z-index: 320; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; }
+.settings-dialog { width: min(420px, 92vw); background: #1f1f1f; color: #ddd;
+  border-radius: 6px; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
+.settings-head { padding: 8px 12px; background: #2b2b2b; font-size: 13px; border-radius: 6px 6px 0 0; }
+.settings-body { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.settings-body label { display: grid; grid-template-columns: 1fr 120px; gap: 12px; align-items: center; font-size: 13px; }
+.settings-body input { box-sizing: border-box; width: 100%; background: #111; color: #eee;
+  border: 1px solid #444; border-radius: 4px; padding: 4px 6px; }
+.settings-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; background: #262626; }
+.settings-foot button { padding: 4px 12px; }
+.settings-foot .primary { background: #2b6cb0; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 </style>

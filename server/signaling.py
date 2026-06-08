@@ -50,11 +50,21 @@ async def disconnect_device(sid: str):
 def _reuse_provider(project: str):
     """运行时设备解析：优先复用该工程同节点的 live-view 连接，否则新连(运行结束后由引擎关闭)。"""
     from .flow.engine import _default_device_provider
+    from .project import Project
+
+    meta = Project(project).load_meta()
+    timeouts = meta.get("timeouts") or {}
 
     def provider(device_node):
         sess = sessions.get_by_node(project, device_node["id"])
         if sess is not None:
             return sess.device         # 复用 live-view，不标记 owned（运行结束不关）
+        if device_node.get("type") == "device/rdp":
+            props = dict(device_node.get("properties") or {})
+            props["connect_timeout"] = timeouts.get("rdp_connect_timeout", props.get("connect_timeout", 60))
+            props["first_update_timeout"] = timeouts.get(
+                "rdp_first_update_timeout", props.get("first_update_timeout", 30))
+            device_node = {**device_node, "properties": props}
         return _default_device_provider(device_node)
     return provider
 
