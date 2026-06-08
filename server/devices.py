@@ -35,6 +35,8 @@ class DeviceSession:
                 port=int(cfg.get("port", 3389)),
                 width=int(cfg.get("width", 1280)),
                 height=int(cfg.get("height", 800)),
+                connect_timeout=float(cfg.get("connect_timeout", 60)),
+                first_update_timeout=float(cfg.get("first_update_timeout", 30)),
             )
         elif kind == "pve":
             from .consoles import connect_pve

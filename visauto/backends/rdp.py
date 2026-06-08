@@ -103,6 +103,7 @@ class RDPBackend(Backend):
         deadline = time.monotonic() + self._first_update_timeout
         while not getattr(self._conn, "desktop_buffer_has_data", False):
             if time.monotonic() >= deadline:
+                self.close()
                 raise BackendError("等待首帧 RDP 桌面超时")
             time.sleep(0.05)
 

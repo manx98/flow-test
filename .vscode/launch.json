@@ -20,6 +20,21 @@
             ],
             "cwd": "${workspaceFolder}",
             "subProcess": true
+        },
+        {
+            "name": "Server: FastAPI debug (no reload, RDP)",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "module": "uvicorn",
+            "args": [
+                "server.app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000"
+            ],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }
