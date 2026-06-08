@@ -69,6 +69,7 @@ function createAgentToolForExec(node) {
 
 function registerOne(spec) {
   function NodeClass() {
+    const isDeviceSource = (spec.outputs || []).some((o) => o.type === DEVICE)
     for (const p of spec.inputs || []) this.addInput(p.name, p.type)
     for (const p of spec.outputs || []) this.addOutput(p.name, p.type)
     // 属性 → widget
@@ -79,10 +80,12 @@ function registerOne(spec) {
     }
     this._spec = spec
     // 设备源节点（输出 device 句柄）：仅连接/断开按钮。「设备属性」无 device 输出 → 不加按钮
-    if ((spec.outputs || []).some((o) => o.type === DEVICE)) {
-      this.addWidget('button', '▶ 连接 / 断开', null, () => {
+    if (isDeviceSource) {
+      this._devicePropertyWidgets = (this.widgets || []).slice()
+      this._deviceActionWidget = this.addWidget('button', '连接', null, () => {
         deviceActionHandler && deviceActionHandler(this)
       })
+      this._refreshDeviceState && this._refreshDeviceState()
     }
     // 人机交互节点：截图按钮 + 画面区（显示上游设备视频并把鼠标键盘转发回设备）
     if (spec.type === 'io/interaction') {
@@ -163,6 +166,48 @@ function registerOne(spec) {
   }
   NodeClass.title = spec.title
   NodeClass.desc = spec.type
+  NodeClass.prototype._isDeviceLocked = function () {
+    return !!(this._conn || this._connecting)
+  }
+  NodeClass.prototype._refreshDeviceState = function () {
+    const locked = this._isDeviceLocked()
+    for (const w of this._devicePropertyWidgets || []) {
+      if (w) w.disabled = locked
+    }
+    if (this._deviceActionWidget) {
+      const label = this._connecting ? '连接中…' : this._conn ? '断开' : '连接'
+      this._deviceActionWidget.name = label
+      this._deviceActionWidget.label = label
+      this._deviceActionWidget.disabled = !!this._connecting
+    }
+    this.setDirtyCanvas && this.setDirtyCanvas(true, true)
+  }
+  NodeClass.prototype.setDeviceConnectionState = function (state = {}) {
+    if ('conn' in state) this._conn = state.conn || null
+    if ('connecting' in state) this._connecting = !!state.connecting
+    this._refreshDeviceState()
+  }
+  NodeClass.prototype.setProperty = function (name, value) {
+    if (this._devicePropertyWidgets?.some((w) => w?.options?.property === name) && this._isDeviceLocked()) {
+      return
+    }
+    if (!this.properties) this.properties = {}
+    if (value === this.properties[name]) return
+    const prevValue = this.properties[name]
+    this.properties[name] = value
+    if (this.onPropertyChanged && this.onPropertyChanged(name, value, prevValue) === false) {
+      this.properties[name] = prevValue
+    }
+    if (this.widgets) {
+      for (const w of this.widgets) {
+        if (!w) continue
+        if (w.options?.property === name) {
+          w.value = this.properties[name]
+          break
+        }
+      }
+    }
+  }
   // 右键菜单顶部加「📖 组件说明」：弹窗展示描述 + 出入参 + 属性
   NodeClass.prototype.getExtraMenuOptions = function () {
     const opts = [

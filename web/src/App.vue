@@ -328,7 +328,10 @@ async function openProject() {
   if (!current.value) return
   // 关闭所有设备连接与交互画面
   for (const node of graph._nodes.slice()) {
-    if (node._conn) { try { await node._conn.close() } catch (e) {} node._conn = null }
+    if (node._conn) {
+      try { await node._conn.close() } catch (e) {}
+      node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._conn = null)
+    }
     overlay.detach(node)
   }
   const data = await api.loadFlow(current.value)
@@ -473,9 +476,10 @@ function finishRun() {
 
 // 设备节点「连接/断开」：仅建立/关闭设备会话（视频源），不负责显示与控制。
 async function onDeviceAction(node) {
+  if (node._connecting) return
   if (node._conn) {
     const conn = node._conn
-    node._conn = null
+    node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._conn = null)
     reconcileInteractions()        // 卸载显示此设备的交互画面
     try { await conn.close() } catch (e) {}
     status.value = '已断开'
@@ -483,14 +487,16 @@ async function onDeviceAction(node) {
   }
   const kind = node._spec.type.split('/')[1] // device/local -> local
   const conn = new DeviceConnection()
+  node.setDeviceConnectionState ? node.setDeviceConnectionState({ connecting: true }) : (node._connecting = true)
   status.value = '连接中…'
   try {
     const dev = await conn.connect(kind, { ...node.properties }, current.value, node.id)
-    node._conn = conn
+    node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn, connecting: false }) : (node._conn = conn)
     reconcileInteractions()        // 挂载到已连线的交互节点
     status.value = `已连接 ${kind} ${dev.width}x${dev.height}`
   } catch (e) {
     try { await conn.close() } catch (_) {}
+    node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._connecting = false)
     alert('连接失败: ' + e.message)
     status.value = '连接失败'
   }
