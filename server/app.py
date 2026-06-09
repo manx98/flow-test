@@ -4,13 +4,14 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .models import CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage
 from .project import Project, list_projects
+from .i18n import lang_from_accept_language, localize_catalog, tr, translate_error
 
 app = FastAPI(title="flow-test 测试工作流服务端")
 
@@ -62,61 +63,72 @@ def api_list_projects():
     return {"projects": list_projects()}
 
 
+def _lang(request: Request) -> str:
+    return lang_from_accept_language(request.headers.get("accept-language"))
+
+
 @app.post("/api/projects")
-def api_create_project(body: CreateProject):
-    p = Project(body.name)
+def api_create_project(body: CreateProject, request: Request):
+    lang = _lang(request)
+    try:
+        p = Project(body.name)
+    except ValueError as e:
+        raise HTTPException(400, translate_error(lang, e))
     if p.exists:
-        raise HTTPException(409, "工程已存在")
+        raise HTTPException(409, tr(lang, "api.project_exists", "工程已存在"))
     p.ensure()
     return {"name": p.name}
 
 
-def _require(name: str) -> Project:
-    p = Project(name)
+def _require(name: str, lang: str = "zh") -> Project:
+    try:
+        p = Project(name)
+    except ValueError as e:
+        raise HTTPException(400, translate_error(lang, e))
     if not p.exists:
-        raise HTTPException(404, "工程不存在")
+        raise HTTPException(404, tr(lang, "api.project_not_found", "工程不存在"))
     return p
 
 
 @app.delete("/api/projects/{name}")
-def api_delete_project(name: str):
-    _require(name).delete()
+def api_delete_project(name: str, request: Request):
+    _require(name, _lang(request)).delete()
     return {"ok": True}
 
 
 @app.get("/api/projects/{name}/flow")
-def api_get_flow(name: str):
-    p = _require(name)
+def api_get_flow(name: str, request: Request):
+    p = _require(name, _lang(request))
     p.register_imagepath()
     return {"graph": p.load_flow()}
 
 
 @app.put("/api/projects/{name}/flow")
-def api_put_flow(name: str, body: FlowGraph):
-    _require(name).save_flow(body.graph)
+def api_put_flow(name: str, body: FlowGraph, request: Request):
+    _require(name, _lang(request)).save_flow(body.graph)
     return {"ok": True}
 
 
 @app.get("/api/projects/{name}/meta")
-def api_get_meta(name: str):
-    return {"meta": _require(name).load_meta()}
+def api_get_meta(name: str, request: Request):
+    return {"meta": _require(name, _lang(request)).load_meta()}
 
 
 @app.put("/api/projects/{name}/meta")
-def api_put_meta(name: str, body: Meta):
-    _require(name).save_meta(body.meta)
+def api_put_meta(name: str, body: Meta, request: Request):
+    _require(name, _lang(request)).save_meta(body.meta)
     return {"ok": True}
 
 
 # ======================= 图片 =======================
 @app.get("/api/projects/{name}/images")
-def api_list_images(name: str):
-    return {"images": _require(name).list_images()}
+def api_list_images(name: str, request: Request):
+    return {"images": _require(name, _lang(request)).list_images()}
 
 
 @app.post("/api/projects/{name}/images")
-async def api_upload_image(name: str, file: UploadFile):
-    p = _require(name)
+async def api_upload_image(name: str, file: UploadFile, request: Request):
+    p = _require(name, _lang(request))
     os.makedirs(p.images_dir, exist_ok=True)
     dest = p.image_path(file.filename or "image.png")
     with open(dest, "wb") as f:
@@ -125,50 +137,52 @@ async def api_upload_image(name: str, file: UploadFile):
 
 
 @app.post("/api/projects/{name}/images/{img}/rename")
-def api_rename_image(name: str, img: str, body: RenameImage):
-    p = _require(name)
+def api_rename_image(name: str, img: str, body: RenameImage, request: Request):
+    p = _require(name, _lang(request))
     try:
         return {"name": p.rename_image(img, body.name)}
     except (FileNotFoundError, FileExistsError, ValueError) as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, translate_error(_lang(request), e))
 
 
 @app.get("/api/projects/{name}/images/{img}")
-def api_get_image(name: str, img: str):
-    p = _require(name)
+def api_get_image(name: str, img: str, request: Request):
+    lang = _lang(request)
+    p = _require(name, lang)
     path = p.image_path(img)
     if not os.path.exists(path):
-        raise HTTPException(404, "图片不存在")
+        raise HTTPException(404, tr(lang, "api.image_not_found", "图片不存在"))
     return FileResponse(path)
 
 
 # ======================= 运行结果（报告/证据）=======================
 @app.get("/api/projects/{name}/results")
-def api_list_results(name: str):
-    return {"runs": _require(name).list_runs()}
+def api_list_results(name: str, request: Request):
+    return {"runs": _require(name, _lang(request)).list_runs()}
 
 
 @app.delete("/api/projects/{name}/results")
-def api_clear_results(name: str):
-    return {"deleted": _require(name).clear_runs()}
+def api_clear_results(name: str, request: Request):
+    return {"deleted": _require(name, _lang(request)).clear_runs()}
 
 
 @app.delete("/api/projects/{name}/results/{run}")
-def api_delete_result(name: str, run: str):
-    p = _require(name)
+def api_delete_result(name: str, run: str, request: Request):
+    p = _require(name, _lang(request))
     try:
         p.delete_run(run)
     except FileNotFoundError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, translate_error(_lang(request), e))
     return {"ok": True}
 
 
 @app.get("/api/projects/{name}/results/{run}/{fname}")
-def api_get_result(name: str, run: str, fname: str):
-    p = _require(name)
+def api_get_result(name: str, run: str, fname: str, request: Request):
+    lang = _lang(request)
+    p = _require(name, lang)
     path = p.result_file(run, fname)
     if not os.path.exists(path):
-        raise HTTPException(404, "结果文件不存在")
+        raise HTTPException(404, tr(lang, "api.result_file_not_found", "结果文件不存在"))
     return FileResponse(path)
 
 
@@ -181,7 +195,7 @@ _complete_seq = 0
 
 
 @app.post("/api/complete")
-async def api_complete(body: CompleteReq):
+async def api_complete(body: CompleteReq, request: Request):
     global _complete_seq
     _complete_seq += 1
     mine = _complete_seq
@@ -193,22 +207,23 @@ async def api_complete(body: CompleteReq):
             comps = await asyncio.to_thread(complete, body.code, body.line, body.column)
             return {"completions": comps}
         except ImportError:
-            raise HTTPException(503, "代码补全需要 jedi：pip install jedi")
+            raise HTTPException(503, tr(_lang(request), "api.complete_needs_jedi",
+                                        "代码补全需要 jedi：pip install jedi"))
 
 
 # ======================= 脚本语法检查（compile）=======================
 @app.post("/api/check")
-def api_check(body: CheckReq):
+def api_check(body: CheckReq, request: Request):
     # compile() 是微秒级，直接同步即可，无需补全那套串行/去抖机制
     from .check import check_syntax
-    return {"errors": check_syntax(body.code)}
+    return {"errors": check_syntax(body.code, lang=_lang(request))}
 
 
 # ======================= 节点目录（前端建面板用）=======================
 @app.get("/api/nodes")
-def api_node_catalog():
+def api_node_catalog(request: Request):
     from .flow.catalog import node_catalog
-    return JSONResponse(node_catalog())
+    return JSONResponse(localize_catalog(node_catalog(), _lang(request)))
 
 
 # ======================= WebRTC / WS（M2/M3）=======================
@@ -217,7 +232,7 @@ def _mount_realtime():
         from .signaling import router as ws_router
         app.include_router(ws_router)
     except Exception as e:  # 实时模块未就绪时不影响 REST
-        print(f"[warn] 实时模块未挂载：{e}")
+        print(tr("zh", "api.realtime_mount_failed", "[warn] 实时模块未挂载：{error}", error=e))
 
 
 _mount_realtime()

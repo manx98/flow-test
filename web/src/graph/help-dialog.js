@@ -1,10 +1,11 @@
 // 组件说明弹窗：右键菜单「📖 组件说明」打开，展示节点描述 + 出入参 + 属性。
 // 数据来自节点 _spec（即服务端 flow/catalog.py 的单一真源）。
+import { t } from '../i18n.js'
 
 // 基数/必选 → 中文连接说明
 function conn(p) {
-  const card = p.cardinality === '*' ? '可多连' : '单连'
-  return p.required ? card + '·必选' : card
+  const card = p.cardinality === '*' ? t('graph.help.multiConnect') : t('graph.help.singleConnect')
+  return p.required ? card + ' · ' + t('graph.help.required') : card
 }
 
 // 类型徽标（带 catalog.types 里的颜色小点）
@@ -50,7 +51,7 @@ function addRow(tbody, cells) {
       verticalAlign: 'top', color: '#e6e6e6',
     })
     if (c instanceof Node) td.appendChild(c)
-    else td.textContent = c == null || c === '' ? '—' : String(c)
+    else td.textContent = c == null || c === '' ? t('graph.help.empty') : String(c)
     tr.appendChild(td)
   }
   tbody.appendChild(tr)
@@ -110,7 +111,7 @@ export function showNodeHelp(spec, colors) {
     border: '1px solid rgba(255,255,255,0.2)', borderRadius: '10px',
   })
   const btn = document.createElement('button')
-  btn.textContent = '✕'; btn.title = '关闭 (Esc)'
+  btn.textContent = '✕'; btn.title = t('graph.help.closeTitle')
   Object.assign(btn.style, {
     cursor: 'pointer', border: 'none', background: 'transparent', color: '#bbb',
     fontSize: '16px', lineHeight: '1', padding: '0 2px',
@@ -136,7 +137,7 @@ export function showNodeHelp(spec, colors) {
       border: '1px solid rgba(120,180,255,0.25)', borderRadius: '6px',
     })
     const lbl = document.createElement('span')
-    lbl.textContent = '🐍 脚本函数'
+    lbl.textContent = '🐍 ' + t('graph.help.scriptFunction')
     Object.assign(lbl.style, { color: '#9fd0ff', flex: '0 0 auto', fontSize: '11px' })
     const code = document.createElement('code')
     code.textContent = spec.script
@@ -146,7 +147,7 @@ export function showNodeHelp(spec, colors) {
     })
     code.addEventListener('mousedown', (e) => e.stopPropagation())
     const copy = document.createElement('button')
-    copy.textContent = '⧉'; copy.title = '复制函数'
+    copy.textContent = '⧉'; copy.title = t('graph.help.copyFunction')
     Object.assign(copy.style, {
       flex: '0 0 auto', cursor: 'pointer', border: 'none', borderRadius: '3px',
       background: 'rgba(255,255,255,0.12)', color: '#fff', padding: '1px 6px', lineHeight: '1',
@@ -161,14 +162,14 @@ export function showNodeHelp(spec, colors) {
 
   // 注入对象 + 内置函数（目前仅 Python 脚本节点带这些字段）
   if (spec.injects && spec.injects.length) {
-    panel.appendChild(section('注入对象'))
-    const { table, tbody } = makeTable(['名称', '说明'])
+    panel.appendChild(section(t('graph.help.injects')))
+    const { table, tbody } = makeTable([t('graph.help.name'), t('graph.help.description')])
     for (const o of spec.injects) addRow(tbody, [codeCell(o.name), o.desc])
     panel.appendChild(table)
   }
   if (spec.functions && spec.functions.length) {
-    panel.appendChild(section('内置函数（等价各组件）'))
-    const { table, tbody } = makeTable(['函数', '说明'])
+    panel.appendChild(section(t('graph.help.functions')))
+    const { table, tbody } = makeTable([t('graph.help.function'), t('graph.help.description')])
     for (const f of spec.functions) addRow(tbody, [codeCell(f.sig), f.desc])
     panel.appendChild(table)
   }
@@ -176,18 +177,22 @@ export function showNodeHelp(spec, colors) {
   const ports = (list, label) => {
     if (!list || !list.length) return
     panel.appendChild(section(label))
-    const { table, tbody } = makeTable(['名称', '类型', '连接', '说明'])
+    const { table, tbody } = makeTable([
+      t('graph.help.name'), t('graph.help.type'), t('graph.help.connection'), t('graph.help.description'),
+    ])
     for (const p of list) addRow(tbody, [p.name, typeTag(p.type, colors), conn(p), p.desc])
     panel.appendChild(table)
   }
-  ports(spec.inputs, '输入')
-  ports(spec.outputs, '输出')
+  ports(spec.inputs, t('graph.help.inputs'))
+  ports(spec.outputs, t('graph.help.outputs'))
 
   if (spec.properties && spec.properties.length) {
-    panel.appendChild(section('属性'))
-    const { table, tbody } = makeTable(['名称', '类型', '默认值', '说明'])
+    panel.appendChild(section(t('graph.help.properties')))
+    const { table, tbody } = makeTable([
+      t('graph.help.name'), t('graph.help.type'), t('graph.help.defaultValue'), t('graph.help.description'),
+    ])
     for (const pr of spec.properties) {
-      const def = pr.default === '' || pr.default == null ? '—' : String(pr.default)
+      const def = pr.default === '' || pr.default == null ? t('graph.help.empty') : String(pr.default)
       addRow(tbody, [pr.name, pr.type, def, pr.desc])
     }
     panel.appendChild(table)

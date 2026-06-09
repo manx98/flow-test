@@ -14,6 +14,7 @@ import visauto
 from visauto import Pattern, ScriptAborted
 from visauto.settings import check_abort
 
+from ..i18n import tr
 from .graph import GraphModel
 
 # 节点处理器注册表：type -> {"eval": fn(ctx,node)->dict, "run": fn(ctx,node)->next_slot|None}
@@ -32,7 +33,7 @@ def handler(ntype, kind):
 
 class RunContext:
     def __init__(self, graph: GraphModel, on_state, abort_event, device_provider, report,
-                 evidence_sink=None, on_event=None):
+                 evidence_sink=None, on_event=None, lang: str = "zh"):
         self.graph = graph
         self.on_state = on_state or (lambda *a, **k: None)
         self.on_event = on_event or (lambda ev: None)   # 通用事件通道（如提示弹窗）
@@ -40,11 +41,15 @@ class RunContext:
         self.device_provider = device_provider
         self.report = report
         self.evidence_sink = evidence_sink   # callable(node_id, frame_bgr) -> ref|None
+        self.lang = lang
         self.values: dict = {}        # (node_id, out_slot_idx) -> value（latched/memo）
         self.evaluated: set = set()   # 已 pure 求值的节点
         self.vars: dict = {}
         self.devices: dict = {}       # device_node_id -> Device
         self.catch_depth = 0           # >0 时节点异常由外层 try/catch 接管，不写入最终报告错误
+
+    def tr(self, key: str, default: str = "", **vars):
+        return tr(self.lang, key, default, **vars)
 
     # ---- data 拉取 ----
     def get_input(self, node, name):
@@ -178,8 +183,9 @@ class RunContext:
 
 
 class Engine:
-    def __init__(self, graph_data: dict):
+    def __init__(self, graph_data: dict, lang: str = "zh"):
         self.graph = GraphModel(graph_data)
+        self.lang = lang
 
     def run(self, on_state=None, abort_event=None, device_provider=None, evidence_sink=None,
             on_event=None):
@@ -188,17 +194,17 @@ class Engine:
         abort_event = abort_event or threading.Event()
         provider = device_provider or _default_device_provider
         ctx = RunContext(self.graph, on_state, abort_event, provider, report,
-                         evidence_sink=evidence_sink, on_event=on_event)
+                         evidence_sink=evidence_sink, on_event=on_event, lang=self.lang)
 
         visauto.set_abort_event(abort_event)
         try:
             starts = self.graph.nodes_of_type("flow/start")
             if not starts:
-                raise RuntimeError("流程缺少「开始」节点")
+                raise RuntimeError(tr(self.lang, "engine.missing_start", "流程缺少「开始」节点"))
             ctx.run_chain_from(starts[0])
             report.finalize()
         except ScriptAborted:
-            report.finalize("已中止")
+            report.finalize(tr(self.lang, "engine.aborted", "已中止"))
         except Exception as e:
             report.finalize(str(e))
         finally:
@@ -299,7 +305,10 @@ def _eval_var_get(ctx, node):
     name = ctx.graph.prop(node, "name", "v")
     if name not in ctx.vars:
         # 变量未设置：错误归到取变量节点自身（标红+展示），上层拉取它的节点只标红
-        exc = RuntimeError(f"取变量失败：变量「{name}」未设置（请先用「设变量」对它赋值）")
+        exc = RuntimeError(ctx.tr(
+            "engine.var_not_set",
+            "取变量失败：变量「{name}」未设置（请先用「设变量」对它赋值）",
+            name=name))
         ctx.report_error(node["id"], exc)
         raise exc
     return {"value": ctx.vars[name]}
@@ -354,7 +363,7 @@ def _run_try_catch(ctx, node):
     ctx.set_output(node, "error", str(caught))
     ctx.set_output(node, "error_type", type(caught).__name__)
     ctx.set_output(node, "error_node", getattr(caught, "_flow_node_id", None))
-    ctx.on_state(node["id"], "ok", f"已捕获：{caught}")
+    ctx.on_state(node["id"], "ok", ctx.tr("engine.caught", "已捕获：{error}", error=caught))
     ctx.run_branch(node, "catch")
     return "done"
 
@@ -363,7 +372,7 @@ def _run_try_catch(ctx, node):
 def _run_raise(ctx, node):
     msg = ctx.get_input(node, "message")
     if msg in (None, ""):
-        msg = ctx.graph.prop(node, "message", "主动抛出异常")
+        msg = ctx.graph.prop(node, "message", ctx.tr("engine.raise_default", "主动抛出异常"))
     raise RuntimeError(str(msg))
 
 
@@ -406,7 +415,7 @@ def _run_find_image(ctx, node):
     dev = _need_dev_in(ctx, node)
     tmpl = ctx.get_input(node, "template")
     if tmpl is None:
-        raise RuntimeError("找图节点缺少模板")
+        raise RuntimeError(ctx.tr("engine.find_image_missing_template", "找图节点缺少模板"))
     mask = ctx.get_input(node, "mask")   # 可选遮罩（ndarray，255 参与/0 忽略）
     sim = float(ctx.graph.prop(node, "similarity", 0.7))
     timeout = float(ctx.graph.prop(node, "timeout", 0))
@@ -499,12 +508,12 @@ def _run_ai_find(ctx, node, kind):
     dev = _need_dev_in(ctx, node)
     ai = ctx.get_input(node, "ai")
     if ai is None:
-        raise RuntimeError("AI 查找未连接「AI 引擎」(ai 输入)")
+        raise RuntimeError(ctx.tr("engine.ai_find_missing_engine", "AI 查找未连接「AI 引擎」(ai 输入)"))
     desc = ctx.get_input(node, "desc")
     if desc in (None, ""):
         desc = ctx.graph.prop(node, "prompt", "")
     if not desc:
-        raise RuntimeError("AI 查找缺少描述（连 desc 或填 prompt 属性）")
+        raise RuntimeError(ctx.tr("engine.ai_find_missing_desc", "AI 查找缺少描述（连 desc 或填 prompt 属性）"))
     m = dev.ai_locate(desc, ai=ai, kind=kind)
     minc = float(ctx.graph.prop(node, "min_confidence", 0))
     if m is not None and getattr(m, "score", 1.0) < minc:
@@ -558,15 +567,15 @@ def _echo_agent_step(ctx, node, frame, target):
 def _run_ai_agent(ctx, node):
     dev = ctx.get_input(node, "device")
     if dev is None:
-        raise RuntimeError("AI 交互未连接设备(device 输入)")
+        raise RuntimeError(ctx.tr("engine.ai_agent_missing_device", "AI 交互未连接设备(device 输入)"))
     ai = ctx.get_input(node, "ai")
     if ai is None:
-        raise RuntimeError("AI 交互未连接「AI 引擎」(ai 输入)")
+        raise RuntimeError(ctx.tr("engine.ai_agent_missing_engine", "AI 交互未连接「AI 引擎」(ai 输入)"))
     goal = ctx.get_input(node, "goal")
     if goal in (None, ""):
         goal = ctx.graph.prop(node, "prompt", "")
     if not goal:
-        raise RuntimeError("AI 交互缺少目标（连 goal 或填 prompt 属性）")
+        raise RuntimeError(ctx.tr("engine.ai_agent_missing_goal", "AI 交互缺少目标（连 goal 或填 prompt 属性）"))
     max_steps = int(ctx.graph.prop(node, "max_steps", 15))
 
     from visauto.ai.agent import _action_brief
@@ -574,10 +583,15 @@ def _run_ai_agent(ctx, node):
     def on_step(step, action, screen, target):
         _echo_agent_step(ctx, node, screen, target)
         if action.get("action") != "finish":
-            ctx.report.log(f"[AI第{step}步] {action.get('reasoning', '')} → {_action_brief(action)}")
+            ctx.report.log(ctx.tr(
+                "engine.ai_step", "[AI第{step}步] {reasoning} → {action}",
+                step=step, reasoning=action.get("reasoning", ""), action=_action_brief(action)))
 
     ok, msg, steps = dev.ai_agent(goal, ai=ai, max_steps=max_steps, on_step=on_step)
-    ctx.report.log(f"[AI交互] {'完成' if ok else '失败'}（{steps}步）：{msg}")
+    ctx.report.log(ctx.tr(
+        "engine.ai_done", "[AI交互] {status}（{steps}步）：{message}",
+        status=ctx.tr("engine.done", "完成") if ok else ctx.tr("engine.failed", "失败"),
+        steps=steps, message=msg))
     ctx.set_output(node, "result", msg)
     ctx.set_output(node, "ok", ok)
     ctx.set_output(node, "steps", steps)
@@ -627,7 +641,7 @@ def _mouse_dev(ctx, node):
     # mouse 输入的值即设备句柄（来自「设备属性」的 mouse 输出）
     dev = ctx.get_input(node, "mouse")
     if dev is None:
-        raise RuntimeError("动作节点未连接设备(mouse)，请经「设备属性」接入")
+        raise RuntimeError(ctx.tr("engine.action_missing_mouse", "动作节点未连接设备(mouse)，请经「设备属性」接入"))
     return dev
 
 
@@ -635,7 +649,7 @@ def _mouse_dev(ctx, node):
 def _run_click(ctx, node):
     p = ctx.get_input(node, "target")
     if p is None:
-        raise RuntimeError("点击节点缺少目标点(target)")
+        raise RuntimeError(ctx.tr("engine.click_missing_target", "点击节点缺少目标点(target)"))
     x, y = _xy(p)
     dev = _mouse_dev(ctx, node)
     if ctx.graph.prop(node, "double", False):
@@ -652,7 +666,7 @@ def _run_type(ctx, node):
     text = ctx.get_input(node, "text") or ""
     dev = ctx.get_input(node, "keyboard")   # keyboard 输入的值即设备句柄
     if dev is None:
-        raise RuntimeError("输入文本节点未连接设备(keyboard)，请经「设备属性」接入")
+        raise RuntimeError(ctx.tr("engine.type_missing_keyboard", "输入文本节点未连接设备(keyboard)，请经「设备属性」接入"))
     if ctx.graph.prop(node, "paste", False):
         dev.paste(text)
     else:
@@ -664,7 +678,7 @@ def _run_type(ctx, node):
 def _run_scroll(ctx, node):
     p = ctx.get_input(node, "target")
     if p is None:
-        raise RuntimeError("滚动节点缺少目标点(target)")
+        raise RuntimeError(ctx.tr("engine.scroll_missing_target", "滚动节点缺少目标点(target)"))
     x, y = _xy(p)
     dy = int(ctx.graph.prop(node, "dy", -1))
     _mouse_dev(ctx, node).mouse.scroll(x, y, 0, dy)
@@ -676,7 +690,7 @@ def _run_drag(ctx, node):
     src = ctx.get_input(node, "src")
     dst = ctx.get_input(node, "dst")
     if src is None or dst is None:
-        raise RuntimeError("拖拽节点缺少 src/dst 点")
+        raise RuntimeError(ctx.tr("engine.drag_missing_points", "拖拽节点缺少 src/dst 点"))
     sx, sy = _xy(src)
     dx, dy = _xy(dst)
     _mouse_dev(ctx, node).mouse.drag_drop(sx, sy, dx, dy)
@@ -727,7 +741,7 @@ def _run_alert(ctx, node):
     msg = str(val) if val not in (None, "") else ctx.graph.prop(node, "message", "")
     level = ctx.graph.prop(node, "level", "info")
     ctx.emit({"type": "alert", "id": node["id"], "level": level, "message": msg})
-    ctx.report.log(f"[提示] {msg}")
+    ctx.report.log(ctx.tr("engine.alert_log", "[提示] {message}", message=msg))
     ctx.on_state(node["id"], "ok", msg)
     return "out"
 
@@ -860,7 +874,7 @@ class ScriptGlobals:
         """提示（等价「提示」）：弹出非阻塞提示。"""
         self._ctx.emit({"type": "alert", "id": self._node["id"],
                         "level": level, "message": str(message)})
-        self._ctx.report.log(f"[提示] {message}")
+        self._ctx.report.log(self._ctx.tr("engine.alert_log", "[提示] {message}", message=message))
 
     def get_var(self, name, default=None):
         """取变量（等价「取变量」）。设备/脚本值自动包装为 ScriptDevice/可调用。"""
@@ -918,7 +932,7 @@ def _eval_script_def(ctx, node):
 def _run_script_exec(ctx, node):
     sdef = ctx.get_input(node, "script")
     if sdef is None:
-        raise RuntimeError("Python 执行未连接「Python 脚本」(script 输入)")
+        raise RuntimeError(ctx.tr("engine.python_missing_script", "Python 执行未连接「Python 脚本」(script 输入)"))
     # 动态命名入参口 → args（排除 exec 与 script 定义口本身；script 类型的「参数」口仍纳入）
     args = {}
     for slot in node.get("inputs") or []:
@@ -965,12 +979,12 @@ def _eval_agent_tool(ctx, node):
 def _run_agent(ctx, node):
     ai = ctx.get_input(node, "ai")
     if ai is None:
-        raise RuntimeError("Agent 未连接「AI 引擎」(ai 输入)")
+        raise RuntimeError(ctx.tr("engine.agent_missing_engine", "Agent 未连接「AI 引擎」(ai 输入)"))
     task = ctx.get_input(node, "task")
     if task in (None, ""):
         task = ctx.graph.prop(node, "prompt", "")
     if not task:
-        raise RuntimeError("Agent 缺少任务（连 task 或填 prompt 属性）")
+        raise RuntimeError(ctx.tr("engine.agent_missing_task", "Agent 缺少任务（连 task 或填 prompt 属性）"))
     max_steps = int(ctx.graph.prop(node, "max_steps", 10))
     # 收集 tool 输入口 → ToolDef + 给模型的 schema
     tools, schema = {}, []
@@ -999,13 +1013,13 @@ def _run_agent(ctx, node):
         tname = action.get("tool")
         args = action.get("args") or {}
         td = tools.get(tname)
-        res = {"error": f"未知工具 {tname}"} if td is None else td.invoke(ctx, args)
+        res = {"error": ctx.tr("engine.unknown_tool", "未知工具 {name}", name=tname)} if td is None else td.invoke(ctx, args)
         _emit(step, reasoning=reasoning, tool=str(tname), args=str(args), result=str(res))
         ctx.report.log(f"[Agent第{step}步] {reasoning} → {tname}({args}) = {res}")
         history.append(f"{step}. {reasoning} -> {tname}({args}) = {res}")
     else:
-        result = f"超过最大步数 {max_steps}"
-        ctx.report.log(f"[Agent] 失败：{result}")
+        result = ctx.tr("engine.agent_exceeded_steps", "超过最大步数 {max_steps}", max_steps=max_steps)
+        ctx.report.log(ctx.tr("engine.agent_failed", "[Agent] 失败：{result}", result=result))
     ctx.set_output(node, "result", result)
     return "done" if ok else "failed"
 
@@ -1014,7 +1028,10 @@ def _need_dev_in(ctx, node):
     # video 输入的值即设备句柄（来自「设备属性」的 video 输出）
     dev = ctx.get_input(node, "video")
     if dev is None:
-        raise RuntimeError(f"节点 {node.get('type')} 未连接设备(video)，请经「设备属性」接入")
+        raise RuntimeError(ctx.tr(
+            "engine.video_missing_device",
+            "节点 {type} 未连接设备(video)，请经「设备属性」接入",
+            type=node.get("type")))
     return dev
 
 

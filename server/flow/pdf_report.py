@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 
+from ..i18n import tr
+
 _FONT = "STSong-Light"   # reportlab 内置 Adobe CJK 字体（中文）
 _font_ready = False
 
@@ -17,7 +19,7 @@ def _ensure_font():
     _font_ready = True
 
 
-def build_pdf(report: dict, out_path: str, title: str, run_dir: str) -> None:
+def build_pdf(report: dict, out_path: str, title: str, run_dir: str, lang: str = "zh") -> None:
     """report: Report.to_dict()；run_dir: 证据 PNG 所在目录。"""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -36,21 +38,25 @@ def build_pdf(report: dict, out_path: str, title: str, run_dir: str) -> None:
     passed = report.get("passed")
     story = []
     story.append(Paragraph(title, h1))
-    summary = (f'结果：<b>{"✅ 通过" if passed else "❌ 失败"}</b>　'
-               f'断言 {report.get("total", 0) - report.get("failed", 0)}/{report.get("total", 0)} 通过　'
-               f'耗时 {report.get("duration", 0)}s')
+    status = tr(lang, "report.passed", "通过") if passed else tr(lang, "report.failed", "失败")
+    summary = (f'{tr(lang, "report.result", "结果")}：<b>{"✅" if passed else "❌"} {status}</b>　'
+               f'{tr(lang, "report.assertions", "断言")} '
+               f'{report.get("total", 0) - report.get("failed", 0)}/{report.get("total", 0)} '
+               f'{tr(lang, "report.passed", "通过")}　'
+               f'{tr(lang, "report.duration", "耗时")} {report.get("duration", 0)}s')
     if report.get("error"):
-        summary += f'　错误：{report["error"]}'
+        summary += f'　{tr(lang, "report.error", "错误")}：{report["error"]}'
     story.append(Paragraph(summary, body))
     story.append(Spacer(1, 0.4 * cm))
 
     # 断言表
     asserts = report.get("asserts", [])
     if asserts:
-        story.append(Paragraph("断言", h2))
-        data = [["#", "结果", "消息", "节点"]]
+        story.append(Paragraph(tr(lang, "report.assertions", "断言"), h2))
+        data = [["#", tr(lang, "report.result", "结果"),
+                 tr(lang, "report.message", "消息"), tr(lang, "report.node", "节点")]]
         for idx, a in enumerate(asserts, 1):
-            data.append([str(idx), "通过" if a["ok"] else "失败",
+            data.append([str(idx), tr(lang, "report.passed", "通过") if a["ok"] else tr(lang, "report.failed", "失败"),
                          a.get("message") or "", str(a.get("node"))])
         t = Table(data, colWidths=[1 * cm, 2 * cm, 10 * cm, 2 * cm])
         ts = TableStyle([
@@ -70,9 +76,9 @@ def build_pdf(report: dict, out_path: str, title: str, run_dir: str) -> None:
     evid = [(i + 1, a) for i, a in enumerate(asserts) if not a["ok"] and a.get("evidence")]
     evid += [(None, e) for e in report.get("errors", []) if e.get("evidence")]
     if evid:
-        story.append(Paragraph("失败证据", h2))
+        story.append(Paragraph(tr(lang, "report.failure_evidence", "失败证据"), h2))
         for idx, item in evid:
-            cap = item.get("message") or item.get("evidence") or "证据"
+            cap = item.get("message") or item.get("evidence") or tr(lang, "report.evidence", "证据")
             story.append(Paragraph(f'· {cap}', body))
             img = _evidence_image(run_dir, item.get("evidence"), ImageReader, Image, cm)
             if img is not None:
@@ -81,14 +87,16 @@ def build_pdf(report: dict, out_path: str, title: str, run_dir: str) -> None:
 
     # 错误
     if report.get("errors"):
-        story.append(Paragraph("节点错误", h2))
+        story.append(Paragraph(tr(lang, "report.node_errors", "节点错误"), h2))
         for e in report["errors"]:
-            story.append(Paragraph(f'· 节点 {e.get("node")}: {e.get("message")}', body))
+            story.append(Paragraph(
+                f'· {tr(lang, "report.node_error_line", "节点 {node}: {message}", node=e.get("node"), message=e.get("message"))}',
+                body))
         story.append(Spacer(1, 0.3 * cm))
 
     # 日志
     if report.get("logs"):
-        story.append(Paragraph("日志", h2))
+        story.append(Paragraph(tr(lang, "report.logs", "日志"), h2))
         for line in report["logs"]:
             story.append(Paragraph(_esc(line), body))
 

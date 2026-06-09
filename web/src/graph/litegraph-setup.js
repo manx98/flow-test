@@ -2,6 +2,7 @@
 import { LiteGraph, LGraphCanvas } from 'litegraph.js'
 import { showNodeHelp } from './help-dialog.js'
 import { openPortEditor, EDITABLE_TYPES } from './port-editor.js'
+import { t } from '../i18n.js'
 
 const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any', DEVICE = 'device', TOOL = 'tool'
 
@@ -45,7 +46,7 @@ function createAgentToolForExec(node) {
   const g = node.graph
   if (!g) return
   const tool = LiteGraph.createNode('agent/tool')
-  if (!tool) { alert('未找到 Agent 工具节点类型'); return }
+  if (!tool) { alert(t('app.alerts.agentToolTypeMissing')); return }
   g.add(tool)
   const argInputs = (node.inputs || []).filter((i) => i.type !== EXEC && i.name !== 'script')
   const resultOutputs = (node.outputs || []).filter((o) => o.type !== EXEC)
@@ -67,6 +68,19 @@ function createAgentToolForExec(node) {
   node.setDirtyCanvas(true, true)
 }
 
+function markI18nWidget(widget, key, prefix = '') {
+  widget._i18nKey = key
+  widget._i18nPrefix = prefix
+  refreshI18nWidget(widget)
+}
+
+function refreshI18nWidget(widget) {
+  if (!widget?._i18nKey) return
+  const label = (widget._i18nPrefix || '') + t(widget._i18nKey)
+  widget.name = label
+  widget.label = label
+}
+
 function registerOne(spec) {
   function NodeClass() {
     const isDeviceSource = (spec.outputs || []).some((o) => o.type === DEVICE)
@@ -82,40 +96,45 @@ function registerOne(spec) {
     // 设备源节点（输出 device 句柄）：仅连接/断开按钮。「设备属性」无 device 输出 → 不加按钮
     if (isDeviceSource) {
       this._devicePropertyWidgets = (this.widgets || []).slice()
-      this._deviceActionWidget = this.addWidget('button', '连接', null, () => {
+      this._deviceActionWidget = this.addWidget('button', t('graph.widgets.connect'), null, () => {
         deviceActionHandler && deviceActionHandler(this)
       })
       this._refreshDeviceState && this._refreshDeviceState()
     }
     // 人机交互节点：截图按钮 + 画面区（显示上游设备视频并把鼠标键盘转发回设备）
     if (spec.type === 'io/interaction') {
-      this.addWidget('button', '📷 截图', null, () => {
+      const w = this.addWidget('button', '', null, () => {
         captureHandler && captureHandler(this)
       })
+      markI18nWidget(w, 'graph.widgets.capture', '📷 ')
       this._showVideo = true
     }
     // 模板图片节点：本地上传 / 剪贴板粘贴 两种方式选图（回显由 ShotOverlay 处理）
     if (spec.type === 'const/image') {
-      this.addWidget('button', '📁 上传图片', null, () => {
+      let w = this.addWidget('button', '', null, () => {
         imageActionHandler && imageActionHandler(this, 'upload')
       })
-      this.addWidget('button', '📋 粘贴图片', null, () => {
+      markI18nWidget(w, 'graph.widgets.uploadImage', '📁 ')
+      w = this.addWidget('button', '', null, () => {
         imageActionHandler && imageActionHandler(this, 'paste')
       })
+      markI18nWidget(w, 'graph.widgets.pasteImage', '📋 ')
       this._showShot = true
     }
     // 图片预览节点：显示上游 PICTURE（ShotOverlay 渲染）
     if (spec.type === 'vision/preview') this._showShot = true
     // 创建遮罩节点：编辑遮罩按钮 + 回显遮罩（ShotOverlay 渲染）
     if (spec.type === 'mask/create') {
-      this.addWidget('button', '✏ 编辑遮罩', null, () => {
+      const w = this.addWidget('button', '', null, () => {
         maskActionHandler && maskActionHandler(this)
       })
+      markI18nWidget(w, 'graph.widgets.editMask', '✏ ')
       this._showShot = true
     }
     // 动态端口节点：卡片上只放一个「编辑」按钮，点开用弹窗批量增删改端口/描述
     if (EDITABLE_TYPES.has(spec.type)) {
-      this.addWidget('button', '✎ 编辑', null, () => openPortEditor(this))
+      const w = this.addWidget('button', '', null, () => openPortEditor(this))
+      markI18nWidget(w, 'graph.widgets.edit', '✎ ')
     }
     // 取变量：value 连接点类型随 type 属性切换（自定义连接点类型）
     // 取变量：value 输出连接点类型随 type 属性切换
@@ -175,7 +194,9 @@ function registerOne(spec) {
       if (w) w.disabled = locked
     }
     if (this._deviceActionWidget) {
-      const label = this._connecting ? '连接中…' : this._conn ? '断开' : '连接'
+      const label = this._connecting
+        ? t('graph.widgets.connecting')
+        : this._conn ? t('graph.widgets.disconnect') : t('graph.widgets.connect')
       this._deviceActionWidget.name = label
       this._deviceActionWidget.label = label
       this._deviceActionWidget.disabled = !!this._connecting
@@ -186,6 +207,11 @@ function registerOne(spec) {
     if ('conn' in state) this._conn = state.conn || null
     if ('connecting' in state) this._connecting = !!state.connecting
     this._refreshDeviceState()
+  }
+  NodeClass.prototype.refreshI18n = function () {
+    for (const w of this.widgets || []) refreshI18nWidget(w)
+    this._refreshDeviceState()
+    this.setDirtyCanvas && this.setDirtyCanvas(true, true)
   }
   NodeClass.prototype.setProperty = function (name, value) {
     if (this._devicePropertyWidgets?.some((w) => w?.options?.property === name) && this._isDeviceLocked()) {
@@ -211,11 +237,11 @@ function registerOne(spec) {
   // 右键菜单顶部加「📖 组件说明」：弹窗展示描述 + 出入参 + 属性
   NodeClass.prototype.getExtraMenuOptions = function () {
     const opts = [
-      { content: '📖 组件说明', callback: () => showNodeHelp(this._spec, CATALOG && CATALOG.types) },
+      { content: '📖 ' + t('graph.menu.help'), callback: () => showNodeHelp(this._spec, CATALOG && CATALOG.types) },
     ]
     // Python 执行：一键生成并连接一个 Agent 工具（镜像入参/result 端口）
     if (spec.type === 'script/exec') {
-      opts.push({ content: '🛠 生成 Agent 工具', callback: () => createAgentToolForExec(this) })
+      opts.push({ content: '🛠 ' + t('graph.menu.createAgentTool'), callback: () => createAgentToolForExec(this) })
     }
     opts.push(null)
     return opts
@@ -272,7 +298,7 @@ function addPasswordWidget(node, prop) {
       const canvas = LGraphCanvas.active_canvas || node.graph?.list_of_graphcanvas?.[0]
       if (!canvas) return false
       const cur = (node.properties && node.properties[this.name]) ?? this.value ?? ''
-      const dialog = canvas.prompt('密码', cur, (v) => {
+      const dialog = canvas.prompt(t('graph.dialog.password'), cur, (v) => {
         this.value = v
         node.properties[this.name] = v
         node.setDirtyCanvas(true, true)
@@ -318,9 +344,9 @@ function openMultilineEditor(title, initial, onSave) {
   const foot = document.createElement('div')
   Object.assign(foot.style, { display: 'flex', justifyContent: 'flex-end', gap: '8px', alignItems: 'center' })
   const hint = document.createElement('span')
-  hint.textContent = 'Ctrl+Enter 保存'; Object.assign(hint.style, { marginRight: 'auto', color: '#889', fontSize: '11px' })
-  const cancel = document.createElement('button'); cancel.textContent = '取消'
-  const save = document.createElement('button'); save.textContent = '保存'
+  hint.textContent = t('graph.dialog.saveShortcut'); Object.assign(hint.style, { marginRight: 'auto', color: '#889', fontSize: '11px' })
+  const cancel = document.createElement('button'); cancel.textContent = t('app.common.cancel')
+  const save = document.createElement('button'); save.textContent = t('app.common.save')
   for (const b of [cancel, save]) Object.assign(b.style, { padding: '4px 12px', cursor: 'pointer', borderRadius: '4px', border: 'none' })
   Object.assign(save.style, { background: '#2b6cb0', color: '#fff' })
   Object.assign(cancel.style, { background: '#3a3a3a', color: '#ddd' })

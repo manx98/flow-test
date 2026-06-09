@@ -15,9 +15,11 @@ import urllib.request
 
 import visauto
 
+from .i18n import tr
+
 
 # ===================== Proxmox VE =====================
-def _pve_api(base, path, data=None, *, cookie=None, csrf=None, verify=True):
+def _pve_api(base, path, data=None, *, cookie=None, csrf=None, verify=True, lang: str = "zh"):
     body = urllib.parse.urlencode(data).encode() if data is not None else None
     req = urllib.request.Request(
         base + path, data=body, method="POST" if data is not None else "GET")
@@ -30,10 +32,12 @@ def _pve_api(base, path, data=None, *, cookie=None, csrf=None, verify=True):
         with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
             return json.load(r)["data"]
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"PVE API {path} 失败：{e.code} {e.reason}") from e
+        raise RuntimeError(tr(lang, "device.pve_api_failed", "PVE API {path} 失败：{code} {reason}",
+                              path=path, code=e.code, reason=e.reason)) from e
 
 
 def connect_pve(cfg: dict):
+    lang = cfg.get("__lang", "zh")
     host = cfg.get("host", "127.0.0.1")
     port = int(cfg.get("port", 8006))
     node = cfg.get("node", "")
@@ -43,18 +47,18 @@ def connect_pve(cfg: dict):
     password = cfg.get("password") or ""
     verify = bool(cfg.get("verify_tls", False))
     if not (node and vmid):
-        raise ValueError("PVE 设备需要 node 与 vmid")
+        raise ValueError(tr(lang, "device.pve_missing_node_vmid", "PVE 设备需要 node 与 vmid"))
     base = f"https://{host}:{port}"
 
     # 1) 登录取认证票据 + CSRF
     auth = _pve_api(base, "/api2/json/access/ticket",
-                    {"username": username, "password": password}, verify=verify)
+                    {"username": username, "password": password}, verify=verify, lang=lang)
     cookie = "PVEAuthCookie=" + auth["ticket"]
     csrf = auth["CSRFPreventionToken"]
 
     # 2) 取 VNC 代理票据与端口
     vnc = _pve_api(base, f"/api2/json/nodes/{node}/{vmtype}/{vmid}/vncproxy",
-                   {"websocket": 1}, cookie=cookie, csrf=csrf, verify=verify)
+                   {"websocket": 1}, cookie=cookie, csrf=csrf, verify=verify, lang=lang)
     vncticket, vport = vnc["ticket"], vnc["port"]
 
     # 3) 连 vncwebsocket（RFB over WS，VNC 密码=vncticket，带认证 Cookie）
@@ -68,11 +72,13 @@ def connect_pve(cfg: dict):
 
 # ===================== VMware (WebMKS) =====================
 def connect_vmware(cfg: dict):
+    lang = cfg.get("__lang", "zh")
     try:
         from pyVim.connect import Disconnect, SmartConnect
         from pyVmomi import vim
     except ImportError as e:  # pragma: no cover
-        raise RuntimeError("VMware 设备需要 pyVmomi：pip install pyvmomi") from e
+        raise RuntimeError(tr(lang, "device.vmware_needs_pyvmomi",
+                              "VMware 设备需要 pyVmomi：pip install pyvmomi")) from e
 
     host = cfg.get("host", "")
     port = int(cfg.get("port", 443))
@@ -81,14 +87,14 @@ def connect_vmware(cfg: dict):
     vmref = cfg.get("vm", "")                      # VM 名称或 MoID
     verify = bool(cfg.get("verify_tls", False))
     if not (host and vmref):
-        raise ValueError("VMware 设备需要 host 与 vm")
+        raise ValueError(tr(lang, "device.vmware_missing_host_vm", "VMware 设备需要 host 与 vm"))
 
     ctx = None if verify else ssl._create_unverified_context()
     si = SmartConnect(host=host, user=username, pwd=password, port=port, sslContext=ctx)
     try:
         vm = _find_vm(si.RetrieveContent(), vmref, vim)
         if vm is None:
-            raise ValueError(f"找不到虚拟机：{vmref}")
+            raise ValueError(tr(lang, "device.vmware_vm_not_found", "找不到虚拟机：{vm}", vm=vmref))
         t = vm.AcquireTicket("webmks")            # WebMKS 票据（一次性）
         ws = f"wss://{t.host}:{t.port}/ticket/{t.ticket}"
         kw = {"subprotocols": ("binary",)}        # WebMKS：RFB over WS，无密码(票据已在 URL)

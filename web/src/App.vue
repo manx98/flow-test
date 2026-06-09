@@ -3,18 +3,21 @@
     <div class="toolbar">
       <strong>flow-test</strong>
       <select v-model="current" @change="openProject">
-        <option value="" disabled>选择工程</option>
+        <option value="" disabled>{{ t('app.projectPlaceholder') }}</option>
         <option v-for="p in projects" :key="p" :value="p">{{ p }}</option>
       </select>
-      <button @click="newProject">新建工程</button>
-      <button @click="save" :disabled="!current">保存</button>
-      <button @click="run" :disabled="!current || running">▶ 运行</button>
-      <button @click="stop" :disabled="!running">■ 停止</button>
-      <button @click="openHistory" :disabled="!current">运行历史</button>
-      <button @click="openSettings" :disabled="!current">设置</button>
-      <button class="locate-btn" @click="locateGraph" title="居中适配所有节点">定位</button>
+      <button @click="newProject">{{ t('app.toolbar.newProject') }}</button>
+      <button @click="save" :disabled="!current">{{ t('app.toolbar.save') }}</button>
+      <button @click="run" :disabled="!current || running">▶ {{ t('app.toolbar.run') }}</button>
+      <button @click="stop" :disabled="!running">■ {{ t('app.toolbar.stop') }}</button>
+      <button @click="openHistory" :disabled="!current">{{ t('app.toolbar.history') }}</button>
+      <button @click="openSettings" :disabled="!current">{{ t('app.toolbar.settings') }}</button>
+      <button class="locate-btn" @click="locateGraph" :title="t('app.toolbar.locateTitle')">{{ t('app.toolbar.locate') }}</button>
+      <select class="lang-select" :value="locale" @change="changeLocale($event.target.value)">
+        <option v-for="lang in languages" :key="lang.code" :value="lang.code">{{ lang.label }}</option>
+      </select>
       <template v-if="lastResult">
-        <a v-if="lastResult.pdf_url" :href="lastResult.pdf_url" target="_blank" class="dl">报告PDF</a>
+        <a v-if="lastResult.pdf_url" :href="lastResult.pdf_url" target="_blank" class="dl">{{ t('app.reports.pdf') }}</a>
         <a :href="lastResult.report_url" target="_blank" class="dl">JSON</a>
         <a :href="lastResult.junit_url" target="_blank" class="dl">JUnit</a>
       </template>
@@ -23,20 +26,20 @@
     <div class="body">
       <div class="palette" :class="{ closed: !paletteOpen }">
         <div class="palette-head">
-          <span v-if="paletteOpen">组件</span>
-          <button class="pal-toggle" :title="paletteOpen ? '收起' : '展开'" @click="togglePalette">
+          <span v-if="paletteOpen">{{ t('app.palette.title') }}</span>
+          <button class="pal-toggle" :title="paletteOpen ? t('app.palette.collapse') : t('app.palette.expand')" @click="togglePalette">
             {{ paletteOpen ? '⟨' : '⟩' }}
           </button>
         </div>
         <div v-if="paletteOpen" class="palette-body">
           <div v-for="(items, cat) in categories" :key="cat" class="pal-cat">
             <div class="pal-cat-head" @click="toggleCat(cat)">
-              <span class="pal-arrow">{{ collapsedCats[cat] ? '▸' : '▾' }}</span>{{ cat }}
+              <span class="pal-arrow">{{ collapsedCats[cat] ? '▸' : '▾' }}</span>{{ categoryLabel(cat) }}
             </div>
             <template v-if="!collapsedCats[cat]">
               <div v-for="n in items" :key="n.type" class="pal-item"
                    draggable="true" @dragstart="onNodeDragStart($event, n.type)" :title="n.type">
-                {{ n.title }}
+                {{ nodeTitle(n) }}
               </div>
             </template>
           </div>
@@ -49,51 +52,51 @@
 
       <div v-if="showCropper" class="crop-modal" @mousedown.self="closeCropper">
         <div class="crop-dialog">
-          <div class="crop-head">截图编辑 — 裁剪并命名</div>
+          <div class="crop-head">{{ t('app.crop.title') }}</div>
           <div class="crop-stage">
             <img ref="cropImgEl" :src="cropperSrc" />
           </div>
           <div class="crop-foot">
-            <label>名称 <input v-model="cropName" @keyup.enter="saveCrop" /></label>
+            <label>{{ t('app.crop.name') }} <input v-model="cropName" @keyup.enter="saveCrop" /></label>
             <span class="spacer"></span>
-            <button @click="closeCropper">取消</button>
-            <button class="primary" @click="saveCrop">保存</button>
+            <button @click="closeCropper">{{ t('app.common.cancel') }}</button>
+            <button class="primary" @click="saveCrop">{{ t('app.common.save') }}</button>
           </div>
         </div>
       </div>
 
       <div v-if="showMask" class="crop-modal" @mousedown.self="closeMask">
         <div class="crop-dialog">
-          <div class="crop-head">编辑遮罩 — 涂抹要忽略的区域（白=匹配 / 涂抹=忽略）</div>
+          <div class="crop-head">{{ t('app.mask.title') }}</div>
           <div class="crop-stage mask-stage">
             <canvas ref="maskCanvasEl"></canvas>
           </div>
           <div class="crop-foot">
-            <label>笔刷 <input type="range" min="4" max="80" v-model.number="maskBrush" @input="onMaskBrush" /></label>
-            <button @click="clearMask">清除</button>
+            <label>{{ t('app.mask.brush') }} <input type="range" min="4" max="80" v-model.number="maskBrush" @input="onMaskBrush" /></label>
+            <button @click="clearMask">{{ t('app.mask.clear') }}</button>
             <span class="spacer"></span>
-            <button @click="closeMask">取消</button>
-            <button class="primary" @click="saveMask">保存</button>
+            <button @click="closeMask">{{ t('app.common.cancel') }}</button>
+            <button class="primary" @click="saveMask">{{ t('app.common.save') }}</button>
           </div>
         </div>
       </div>
 
       <div v-if="showSettings" class="settings-modal" @mousedown.self="closeSettings">
         <div class="settings-dialog">
-          <div class="settings-head">连接设置</div>
+          <div class="settings-head">{{ t('app.settings.title') }}</div>
           <div class="settings-body">
             <label>
-              <span>RDP 握手超时</span>
+              <span>{{ t('app.settings.rdpConnectTimeout') }}</span>
               <input type="number" min="5" max="300" step="5" v-model.number="settingsDraft.rdp_connect_timeout" />
             </label>
             <label>
-              <span>RDP 首帧超时</span>
+              <span>{{ t('app.settings.rdpFirstUpdateTimeout') }}</span>
               <input type="number" min="5" max="300" step="5" v-model.number="settingsDraft.rdp_first_update_timeout" />
             </label>
           </div>
           <div class="settings-foot">
-            <button @click="closeSettings">取消</button>
-            <button class="primary" @click="saveSettings">保存</button>
+            <button @click="closeSettings">{{ t('app.common.cancel') }}</button>
+            <button class="primary" @click="saveSettings">{{ t('app.common.save') }}</button>
           </div>
         </div>
       </div>
@@ -106,9 +109,9 @@
 
       <div v-if="showHistory" class="drawer">
         <div class="drawer-head">
-          <span>运行历史 — {{ current }}</span>
+          <span>{{ t('app.history.title') }} - {{ current }}</span>
           <span class="head-actions">
-            <button v-if="runs.length" class="clear" @click="clearRuns">清空</button>
+            <button v-if="runs.length" class="clear" @click="clearRuns">{{ t('app.history.clear') }}</button>
             <button @click="showHistory = false">×</button>
           </span>
         </div>
@@ -116,13 +119,13 @@
           <ul class="runs">
             <li v-for="r in runs" :key="r" :class="{ active: r === selRun }" @click="selectRun(r)">
               <span class="rname">{{ r }}</span>
-              <button class="del" title="删除此记录" @click.stop="deleteRun(r)">🗑</button>
+              <button class="del" :title="t('app.history.deleteTitle')" @click.stop="deleteRun(r)">🗑</button>
             </li>
-            <li v-if="!runs.length" class="empty">暂无运行记录</li>
+            <li v-if="!runs.length" class="empty">{{ t('app.history.empty') }}</li>
           </ul>
           <div v-if="report" class="report">
             <div class="rsum" :class="report.passed ? 'ok' : 'fail'">
-              {{ report.passed ? '✅ 通过' : '❌ 失败 ' + report.failed + '/' + report.total }} · {{ report.duration }}s
+              {{ report.passed ? '✅ ' + t('app.history.passed') : '❌ ' + t('app.history.failed') + ' ' + report.failed + '/' + report.total }} · {{ report.duration }}s
             </div>
             <div class="dls">
               <a :href="resultUrl(selRun, 'report.pdf')" target="_blank">PDF</a>
@@ -135,7 +138,7 @@
               </tr>
             </table>
             <div v-for="(a, idx) in failedEvidence" :key="'e' + idx" class="evid">
-              <div class="ecap">证据 · {{ a.message }}</div>
+              <div class="ecap">{{ t('app.history.evidence') }} · {{ a.message }}</div>
               <img :src="a.evidence" />
             </div>
             <pre v-if="report.logs && report.logs.length" class="logs">{{ report.logs.join('\n') }}</pre>
@@ -155,6 +158,8 @@ import 'cropperjs/dist/cropper.css'
 import { fabric } from 'fabric'
 import { api } from './api.js'
 import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageActionHandler, setMaskActionHandler } from './graph/litegraph-setup.js'
+import { installLiteGraphI18n } from './graph/litegraph-i18n.js'
+import { getLocale, languages, locale, setLocale, t, tr } from './i18n.js'
 import { VideoOverlay } from './graph/video-overlay.js'
 import { ShotOverlay } from './graph/shot-overlay.js'
 import { CodeOverlay } from './graph/code-overlay.js'
@@ -184,6 +189,33 @@ const categories = computed(() => {
   return g
 })
 function toggleCat(cat) { collapsedCats.value = { ...collapsedCats.value, [cat]: !collapsedCats.value[cat] } }
+function categoryLabel(cat) { return t(`app.categories.${cat}`, cat) }
+function nodeTitle(node) { return t(`app.nodes.${node.type}`, node.title) }
+async function changeLocale(nextLocale) {
+  const oldReady = t('app.status.ready')
+  setLocale(nextLocale)
+  await reloadCatalogForLocale()
+  if (status.value === '' || status.value === oldReady) status.value = t('app.status.ready')
+  applyNodeTypeTitles()
+  refreshGraphI18n()
+  lgcanvas && lgcanvas.setDirty(true, true)
+}
+
+async function reloadCatalogForLocale() {
+  const catalog = await api.catalog()
+  registerCatalog(catalog)
+  catalogNodes.value = catalog.nodes
+  const byType = new Map(catalog.nodes.map((spec) => [spec.type, spec]))
+  for (const node of graph?._nodes || []) {
+    const spec = byType.get(node._spec?.type || node.type)
+    if (spec) _updateNodeSpec(node, spec)
+  }
+}
+
+function _updateNodeSpec(node, spec) {
+  node._spec = spec
+  node.title = nodeTitle(spec)
+}
 function togglePalette() {
   paletteOpen.value = !paletteOpen.value
   nextTick(() => { resize(); lgcanvas && lgcanvas.draw(true, true) })   // 布局更新后重算画布并强制重绘
@@ -269,22 +301,22 @@ async function selectRun(r) {
 function resultUrl(run, file) { return api.resultUrl(current.value, run, file) }
 
 async function deleteRun(r) {
-  if (!confirm(`删除运行记录 ${r}？`)) return
+  if (!confirm(tr('app.prompts.deleteRun', { run: r }))) return
   try {
     await api.deleteResult(current.value, r)
     runs.value = runs.value.filter(x => x !== r)
     if (selRun.value === r) { selRun.value = ''; report.value = null }
-    status.value = `已删除记录 ${r}`
-  } catch (e) { alert('删除失败: ' + e.message) }
+    status.value = tr('app.status.deletedRun', { run: r })
+  } catch (e) { alert(tr('app.alerts.deleteFailed', { message: e.message })) }
 }
 
 async function clearRuns() {
-  if (!confirm('清空全部运行历史？')) return
+  if (!confirm(t('app.prompts.clearRuns'))) return
   try {
     const { deleted } = await api.clearResults(current.value)
     runs.value = []; selRun.value = ''; report.value = null
-    status.value = `已清空 ${deleted} 条运行记录`
-  } catch (e) { alert('清空失败: ' + e.message) }
+    status.value = tr('app.status.clearedRuns', { count: deleted })
+  } catch (e) { alert(tr('app.alerts.clearFailed', { message: e.message })) }
 }
 const stage = ref(null)
 const canvasEl = ref(null)
@@ -299,9 +331,11 @@ let errors = null
 let agentTrace = null
 
 onMounted(async () => {
+  installLiteGraphI18n()
   const catalog = await api.catalog()
   registerCatalog(catalog)
   catalogNodes.value = catalog.nodes
+  applyNodeTypeTitles()
 
   graph = new LGraph()
   lgcanvas = new LGraphCanvas(canvasEl.value, graph)
@@ -332,8 +366,19 @@ onMounted(async () => {
 
   graph.start()
   projects.value = await api.listProjects()
-  status.value = '就绪'
+  status.value = t('app.status.ready')
 })
+
+function applyNodeTypeTitles() {
+  for (const spec of catalogNodes.value) {
+    const cls = LiteGraph.registered_node_types?.[spec.type]
+    if (cls) cls.title = nodeTitle(spec)
+  }
+}
+
+function refreshGraphI18n() {
+  for (const node of graph?._nodes || []) node.refreshI18n && node.refreshI18n()
+}
 
 function resize() {
   const r = stage.value.getBoundingClientRect()
@@ -343,14 +388,14 @@ function resize() {
 }
 
 async function newProject() {
-  const name = prompt('工程名')
+  const name = prompt(t('app.prompts.projectName'))
   if (!name) return
   try {
     await api.createProject(name)
     projects.value = await api.listProjects()
     current.value = name
     await openProject()
-  } catch (e) { alert('新建失败: ' + e.message) }
+  } catch (e) { alert(tr('app.alerts.createFailed', { message: e.message })) }
 }
 
 async function openProject() {
@@ -367,8 +412,9 @@ async function openProject() {
   graph.configure(data)
   await loadProjectMeta()
   applyRdpTimeoutsToNodes(timeoutSettings.value)
+  refreshGraphI18n()
   reloadShots()
-  status.value = `已打开 ${current.value}`
+  status.value = tr('app.status.opened', { name: current.value })
 }
 
 async function loadProjectMeta() {
@@ -409,7 +455,7 @@ async function saveSettings() {
   await api.saveMeta(current.value, projectMeta.value)
   applyRdpTimeoutsToNodes(next)
   showSettings.value = false
-  status.value = '设置已保存'
+  status.value = t('app.status.settingsSaved')
 }
 
 function applyRdpTimeoutsToNodes(settings) {
@@ -436,7 +482,7 @@ function reloadShots() {
 
 // 模板图片：本地上传 / 剪贴板粘贴 → 存到 images/ 并回显，写入 properties.name。
 async function onImageAction(node, mode) {
-  if (!current.value) { alert('请先打开工程'); return }
+  if (!current.value) { alert(t('app.alerts.openProjectFirst')); return }
   try {
     const file = mode === 'paste' ? await readClipboardImage() : await pickLocalImage()
     if (!file) return
@@ -444,16 +490,16 @@ async function onImageAction(node, mode) {
     // 弹框指定名称（上传默认用原文件名，粘贴默认 tpl_<id>）
     const suggested = mode === 'paste'
       ? `tpl_${node.id}` : (file.name ? file.name.replace(/\.[^.]+$/, '') : `tpl_${node.id}`)
-    const input = prompt('图片名称', suggested)
+    const input = prompt(t('app.prompts.imageName'), suggested)
     if (input === null) return                       // 取消
     let fname = input.trim() || suggested
     if (!/\.[a-z0-9]+$/i.test(fname)) fname += '.' + ext   // 无扩展名则补上
     const r = await api.uploadImage(current.value, file, fname)
     node.properties.name = r.name
     shots.setImage(node, api.imageUrl(current.value, r.name), { fit: true })
-    status.value = `已设置模板 ${r.name}`
+    status.value = tr('app.status.templateSet', { name: r.name })
   } catch (e) {
-    alert('设置模板失败: ' + e.message)
+    alert(tr('app.alerts.setTemplateFailed', { message: e.message }))
   }
 }
 
@@ -465,7 +511,7 @@ async function onRenameImage(node, newName) {
   const r = await api.renameImage(current.value, old, newName)
   node.properties[key] = r.name
   shots.setImage(node, api.imageUrl(current.value, r.name))
-  status.value = `已重命名为 ${r.name}`
+  status.value = tr('app.status.renamed', { name: r.name })
 }
 
 // 弹系统文件选择器取一张本地图片
@@ -480,18 +526,18 @@ function pickLocalImage() {
 
 // 从剪贴板读取一张图片（需 https 或 localhost，且用户授权）
 async function readClipboardImage() {
-  if (!navigator.clipboard?.read) throw new Error('当前环境不支持读取剪贴板，请用上传')
+  if (!navigator.clipboard?.read) throw new Error(t('app.alerts.clipboardUnsupported'))
   const items = await navigator.clipboard.read()
   for (const it of items) {
     const type = it.types.find(t => t.startsWith('image/'))
     if (type) return await it.getType(type)
   }
-  throw new Error('剪贴板里没有图片')
+  throw new Error(t('app.alerts.clipboardNoImage'))
 }
 
 async function save() {
   await api.saveFlow(current.value, graph.serialize())
-  status.value = `已保存 ${current.value}（${new Date().toLocaleTimeString()}）`
+  status.value = tr('app.status.saved', { name: current.value, time: new Date().toLocaleTimeString() })
 }
 
 const STATUS_COLOR = { running: '#b58900', ok: '#2a7d4f', fail: '#c0392b', skip: '#555' }
@@ -517,11 +563,11 @@ function run() {
   if (shots) shots.clearMatches()   // 清掉上次运行的找图/找文字/等出现结果回显
   if (agentTrace) agentTrace.clearAll()   // 清掉上次 Agent 执行过程
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${proto}://${location.host}/ws/run/${current.value}`)
+  const ws = new WebSocket(`${proto}://${location.host}/ws/run/${current.value}?lang=${encodeURIComponent(getLocale())}`)
   runWs = ws
   ws.onopen = () => {
     running.value = true
-    status.value = '运行中…'
+    status.value = t('app.status.running')
     ws.send(JSON.stringify({ cmd: 'run', graph: graph.serialize() }))
   }
   ws.onmessage = (e) => {
@@ -535,16 +581,19 @@ function run() {
     else if (m.type === 'agent_step') agentTrace.onStep(m.id, m)   // Agent 每步过程
     else if (m.type === 'run' && m.status === 'done') {
       const r = m.report
-      status.value = `运行完成：${r.passed ? '✅ 通过' : '❌ 失败 ' + r.failed + '/' + r.total}（${r.duration}s）`
+      const result = r.passed
+        ? '✅ ' + t('app.status.runPassed')
+        : '❌ ' + tr('app.status.runFailed', { failed: r.failed, total: r.total })
+      status.value = tr('app.status.runDone', { result, duration: r.duration })
       if (m.report_url) lastResult.value = { report_url: m.report_url, junit_url: m.junit_url, pdf_url: m.pdf_url }
       finishRun()
     } else if (m.type === 'run' && (m.status === 'error')) {
-      status.value = '运行错误：' + (m.error || '')
+      status.value = tr('app.status.runError', { error: m.error || '' })
       finishRun()
     }
   }
   ws.onclose = () => finishRun()
-  ws.onerror = () => { status.value = '运行连接出错'; finishRun() }
+  ws.onerror = () => { status.value = t('app.status.runConnectionError'); finishRun() }
 }
 
 function stop() {
@@ -564,7 +613,7 @@ async function onDeviceAction(node) {
     node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._conn = null)
     reconcileInteractions()        // 卸载显示此设备的交互画面
     try { await conn.close() } catch (e) {}
-    status.value = '已断开'
+    status.value = t('app.status.disconnected')
     return
   }
   const kind = node._spec.type.split('/')[1] // device/local -> local
@@ -575,30 +624,30 @@ async function onDeviceAction(node) {
     config.first_update_timeout = timeoutSettings.value.rdp_first_update_timeout
   }
   node.setDeviceConnectionState ? node.setDeviceConnectionState({ connecting: true }) : (node._connecting = true)
-  status.value = '连接中…'
+  status.value = t('app.status.connecting')
   try {
     const dev = await conn.connect(kind, config, current.value, node.id)
     node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn, connecting: false }) : (node._conn = conn)
     reconcileInteractions()        // 挂载到已连线的交互节点
-    status.value = `已连接 ${kind} ${dev.width}x${dev.height}`
+    status.value = tr('app.status.connected', { kind, width: dev.width, height: dev.height })
   } catch (e) {
     try { await conn.close() } catch (_) {}
     node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._connecting = false)
-    alert('连接失败: ' + e.message)
-    status.value = '连接失败'
+    alert(tr('app.alerts.connectFailed', { message: e.message }))
+    status.value = t('app.status.connectFailed')
   }
 }
 
 // 人机交互节点截图：抓当前帧 → 打开 Cropper 裁剪/命名弹框（交互节点的设备连接即 overlay.connOf）。
 async function onCapture(node) {
-  if (!current.value) { alert('请先打开工程'); return }
+  if (!current.value) { alert(t('app.alerts.openProjectFirst')); return }
   const conn = overlay.connOf(node)
-  if (!conn || !conn.stream) { alert('该交互节点未接入已连接的设备视频'); return }
+  if (!conn || !conn.stream) { alert(t('app.alerts.interactionNoDevice')); return }
   try {
     const canvas = await conn.grabFrame()
     openCropper(canvas.toDataURL('image/png'), node)
   } catch (e) {
-    alert('截图失败: ' + e.message)
+    alert(tr('app.alerts.captureFailed', { message: e.message }))
   }
 }
 
@@ -640,7 +689,7 @@ async function saveCrop() {
   try {
     const canvas = cropper.getCroppedCanvas()
     const blob = await new Promise((res, rej) =>
-      canvas.toBlob((b) => b ? res(b) : rej(new Error('裁剪失败')), 'image/png'))
+      canvas.toBlob((b) => b ? res(b) : rej(new Error(t('app.alerts.cropFailed'))), 'image/png'))
     const r = await api.uploadImage(current.value, blob, name)
     // 创建模板图片节点，放在触发截图的交互节点右侧
     const n = LiteGraph.createNode('const/image')
@@ -649,10 +698,10 @@ async function saveCrop() {
     n.pos = a ? [a.pos[0] + a.size[0] + 40, a.pos[1]] : [120, 120]
     graph.add(n)
     shots.setImage(n, api.imageUrl(current.value, r.name), { fit: true })
-    status.value = `已创建模板图片 ${r.name}`
+    status.value = tr('app.status.templateCreated', { name: r.name })
     closeCropper()
   } catch (e) {
-    alert('保存失败: ' + e.message)
+    alert(tr('app.alerts.saveFailed', { message: e.message }))
   }
 }
 
@@ -666,10 +715,10 @@ let maskW = 0, maskH = 0   // 模板原生尺寸（导出用）
 
 // 创建遮罩节点「编辑遮罩」：取 picture 上游模板图为底，打开画板涂抹要忽略的区域
 async function onMaskEdit(node) {
-  if (!current.value) { alert('请先打开工程'); return }
+  if (!current.value) { alert(t('app.alerts.openProjectFirst')); return }
   const slot = (node.inputs || []).findIndex(i => i.name === 'picture')
   const src = slot >= 0 ? pictureSource(node.getInputNode(slot)) : null
-  if (!src) { alert('请先在 picture 输入连接一个模板图片'); return }
+  if (!src) { alert(t('app.alerts.maskNeedsPicture')); return }
   maskAnchor = node
   showMask.value = true
   await nextTick()
@@ -765,15 +814,15 @@ async function saveMask() {
     cx.putImageData(out, 0, 0)
 
     const blob = await new Promise((res, rej) =>
-      c.toBlob((b) => b ? res(b) : rej(new Error('生成遮罩失败')), 'image/png'))
+      c.toBlob((b) => b ? res(b) : rej(new Error(t('app.alerts.maskGenerateFailed'))), 'image/png'))
     const name = `mask_${maskAnchor.id}_${Date.now()}.png`
     const r = await api.uploadImage(current.value, blob, name)
     maskAnchor.properties.mask = r.name
     shots.setImage(maskAnchor, api.imageUrl(current.value, r.name), { fit: true })
-    status.value = `已保存遮罩 ${r.name}`
+    status.value = tr('app.status.maskSaved', { name: r.name })
     closeMask()
   } catch (e) {
-    alert('保存遮罩失败: ' + e.message)
+    alert(tr('app.alerts.maskSaveFailed', { message: e.message }))
   }
 }
 

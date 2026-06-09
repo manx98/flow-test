@@ -4,6 +4,8 @@ from __future__ import annotations
 import time
 from xml.sax.saxutils import escape, quoteattr
 
+from ..i18n import tr
+
 
 class Report:
     def __init__(self):
@@ -50,7 +52,7 @@ class Report:
             "logs": self.logs,
         }
 
-    def to_junit(self, suite_name: str = "flow") -> str:
+    def to_junit(self, suite_name: str = "flow", lang: str = "zh") -> str:
         n = len(self.asserts)
         failures = sum(1 for a in self.asserts if not a["ok"])
         errors = len(self.errors)
@@ -63,14 +65,15 @@ class Report:
             name = a["message"] or f'assert@node{a["node"]}'
             out.append(f'  <testcase classname="node{a["node"]}" name={quoteattr(name)}>')
             if not a["ok"]:
-                detail = "断言失败"
+                detail = tr(lang, "report.assert_failed", "断言失败")
                 if a.get("evidence"):
-                    detail += f"\n证据: {a['evidence']}"
+                    detail += f"\n{tr(lang, 'report.evidence', '证据')}: {a['evidence']}"
                 out.append(f'    <failure message={quoteattr(name)}>{escape(detail)}</failure>')
             out.append("  </testcase>")
         for e in self.errors:
             out.append(f'  <testcase classname="node{e["node"]}" name="error">')
-            detail = e["message"] + (f"\n证据: {e['evidence']}" if e.get("evidence") else "")
+            detail = e["message"] + (
+                f"\n{tr(lang, 'report.evidence', '证据')}: {e['evidence']}" if e.get("evidence") else "")
             out.append(f'    <error message={quoteattr(e["message"][:120])}>{escape(detail)}</error>')
             out.append("  </testcase>")
         if self.error and not self.errors:

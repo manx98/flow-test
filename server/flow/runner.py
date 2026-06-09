@@ -28,7 +28,7 @@ class FlowRunner:
         # 从引擎线程安全投递
         self._loop.call_soon_threadsafe(self._q.put_nowait, ev)
 
-    def start(self, graph: dict, device_provider=None, evidence_sink=None, on_finish=None):
+    def start(self, graph: dict, device_provider=None, evidence_sink=None, on_finish=None, lang: str = "zh"):
         if self._thread and self._thread.is_alive():
             return
         self._abort = threading.Event()
@@ -38,7 +38,7 @@ class FlowRunner:
                 self._emit({"type": "node", "id": nid, "status": status, "info": info})
             self._emit({"type": "run", "status": "start"})
             try:
-                report = Engine(graph).run(
+                report = Engine(graph, lang=lang).run(
                     on_state=on_state, abort_event=self._abort,
                     device_provider=device_provider, evidence_sink=evidence_sink,
                     on_event=self._emit)

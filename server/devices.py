@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 
 import visauto
 
+from .i18n import tr
+
 
 @dataclass
 class DeviceSession:
@@ -20,6 +22,7 @@ class DeviceSession:
         """阻塞连接（调用方放线程池执行）。"""
         kind = self.kind
         cfg = self.config or {}
+        lang = cfg.get("__lang", "zh")
         if kind == "local":
             self.device = visauto.connect_local(monitor=int(cfg.get("monitor", 1)))
         elif kind == "novnc":
@@ -45,7 +48,7 @@ class DeviceSession:
             from .consoles import connect_vmware
             self.device = connect_vmware(cfg)
         else:
-            raise ValueError(f"未知设备类型：{kind}")
+            raise ValueError(tr(lang, "device.unknown_type", "未知设备类型：{kind}", kind=kind))
 
     @property
     def backend(self):
