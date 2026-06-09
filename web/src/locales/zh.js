@@ -150,6 +150,15 @@ export default {
       description: '说明',
       defaultValue: '默认值',
     },
+    hotkey: {
+      title: '选择快捷键',
+      modifiers: '修饰键',
+      keys: '按键',
+      apply: '应用',
+      clear: '清空',
+      close: '关闭',
+      placeholder: '点击选择',
+    },
   },
   litegraph: {
     menu: {

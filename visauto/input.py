@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from .backends.base import Button
@@ -57,6 +58,12 @@ def _norm_modifiers(modifiers) -> list[str]:
         key = _MODIFIER_ALIASES.get(m.lower(), m.lower())
         out.append(key)
     return out
+
+
+def parse_key_combo(keys: str) -> list[str]:
+    """Parse a shortcut string like ``ctrl+shift+t`` into normalized key names."""
+    parts = [p for p in str(keys or "").replace(" ", "").lower().split("+") if p]
+    return [_MODIFIER_ALIASES.get(p, p) for p in parts]
 
 
 class Mouse:
@@ -145,6 +152,30 @@ class Keyboard:
         finally:
             for m in reversed(mods):
                 self._b.key_release(m)
+
+    def hotkey(self, keys: str) -> None:
+        """Press and release a shortcut combo, e.g. ``ctrl+c`` or ``alt+f4``."""
+        combo = parse_key_combo(keys)
+        if not combo:
+            raise ValueError("快捷键不能为空")
+        for key in combo:
+            self._b.key_press(key)
+        for key in reversed(combo):
+            self._b.key_release(key)
+
+    @contextmanager
+    def hold(self, keys: str):
+        """Hold a shortcut combo during the context and always release it."""
+        combo = parse_key_combo(keys)
+        if not combo:
+            raise ValueError("快捷键不能为空")
+        for key in combo:
+            self._b.key_press(key)
+        try:
+            yield
+        finally:
+            for key in reversed(combo):
+                self._b.key_release(key)
 
     def paste(self, text: str) -> None:
         """经剪贴板粘贴（适合长文本/中文）。

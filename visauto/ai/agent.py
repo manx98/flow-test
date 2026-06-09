@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from ..settings import check_abort
+from ..input import parse_key_combo
 
 
 def _norm_xy(region, ax, ay):
@@ -22,7 +23,7 @@ def _norm_xy(region, ax, ay):
 
 def _parse_keys(spec):
     """'ctrl+c' → ('c', ['ctrl'])；'enter' → ('enter', [])。"""
-    parts = [p for p in str(spec).replace(" ", "").lower().split("+") if p]
+    parts = parse_key_combo(spec)
     if not parts:
         return None, []
     return parts[-1], parts[:-1]

@@ -674,6 +674,25 @@ def _run_type(ctx, node):
     return "out"
 
 
+@handler("action/hotkey", "run")
+def _run_hotkey(ctx, node):
+    keys = ctx.get_input(node, "keys")
+    if keys in (None, ""):
+        keys = ctx.graph.prop(node, "keys", "")
+    keys = str(keys or "").strip()
+    if not keys:
+        raise RuntimeError(ctx.tr("engine.hotkey_missing_keys", "快捷键节点缺少按键"))
+    dev = ctx.get_input(node, "keyboard")
+    if dev is None:
+        raise RuntimeError(ctx.tr("engine.type_missing_keyboard", "输入文本节点未连接设备(keyboard)，请经「设备属性」接入"))
+    if ctx.graph.next_exec(node, "hold") is None:
+        dev.keyboard.hotkey(keys)
+    else:
+        with dev.keyboard.hold(keys):
+            ctx.run_branch(node, "hold")
+    return "out"
+
+
 @handler("action/scroll", "run")
 def _run_scroll(ctx, node):
     p = ctx.get_input(node, "target")
@@ -810,6 +829,14 @@ class ScriptDevice:
             self._dev.paste(text)
         else:
             self._dev.type(text)
+
+    def hotkey(self, keys):
+        """快捷键（等价「快捷键」）：按下并释放组合键。"""
+        self._dev.keyboard.hotkey(keys)
+
+    def hold_keys(self, keys):
+        """按住快捷键（等价「快捷键」hold 分支）：上下文退出时自动释放。"""
+        return self._dev.keyboard.hold(keys)
 
     def scroll(self, target, dy=-1):
         """滚动（等价「滚动」）。"""

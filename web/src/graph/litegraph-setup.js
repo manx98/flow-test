@@ -399,6 +399,164 @@ function addMultilineWidget(node, prop) {
   return w
 }
 
+const HOTKEY_MODIFIERS = [
+  ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift'], ['cmd', 'Cmd/Win'],
+]
+const HOTKEY_ROWS = [
+  'A B C D E F G H I J K L M'.split(' '),
+  'N O P Q R S T U V W X Y Z'.split(' '),
+  '1 2 3 4 5 6 7 8 9 0'.split(' '),
+  ['Space', '-', '=', '[', ']', ';', "'", '`', '\\', ',', '.', '/'],
+  ['Enter', 'Tab', 'Esc', 'Backspace', 'Delete', 'Insert'],
+  ['Home', 'End', 'PageUp', 'PageDown', 'Up', 'Down', 'Left', 'Right'],
+  'F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12'.split(' '),
+]
+
+function normalizeHotkeyKey(label) {
+  return label === 'Space' ? 'space' : String(label).toLowerCase()
+}
+
+function formatHotkey(value) {
+  return String(value || '').split('+').filter(Boolean).map((part) => {
+    const p = part.toLowerCase()
+    if (p === 'ctrl') return 'Ctrl'
+    if (p === 'alt') return 'Alt'
+    if (p === 'shift') return 'Shift'
+    if (p === 'cmd') return 'Cmd/Win'
+    if (p === 'space') return 'Space'
+    if (/^f\d+$/.test(p)) return p.toUpperCase()
+    if (p.length === 1) return p.toUpperCase()
+    return p[0]?.toUpperCase() + p.slice(1)
+  }).join('+')
+}
+
+function parseHotkey(value) {
+  const parts = String(value || '').replace(/\s+/g, '').toLowerCase().split('+').filter(Boolean)
+  const mods = []
+  const rest = []
+  for (const p of parts) {
+    const key = p === 'control' ? 'ctrl' : (p === 'meta' || p === 'win' || p === 'super') ? 'cmd' : p
+    if (HOTKEY_MODIFIERS.some(([m]) => m === key)) mods.push(key)
+    else rest.push(key)
+  }
+  return { mods: [...new Set(mods)], key: rest[rest.length - 1] || '' }
+}
+
+function openHotkeyPicker(title, initial, onSave) {
+  const state = parseHotkey(initial)
+  const mask = document.createElement('div')
+  Object.assign(mask.style, {
+    position: 'fixed', inset: '0', zIndex: 9999, background: 'rgba(0,0,0,0.5)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  })
+  const onKey = (e) => { if (e.key === 'Escape') close() }
+  const close = () => { try { mask.remove() } catch (_) {} document.removeEventListener('keydown', onKey) }
+  const combo = (key = state.key) => [...state.mods, key].filter(Boolean).join('+')
+  const save = (key = state.key) => { onSave(combo(key)); close() }
+  document.addEventListener('keydown', onKey)
+  mask.addEventListener('mousedown', (e) => { if (e.target === mask) close() })
+
+  const panel = document.createElement('div')
+  Object.assign(panel.style, {
+    width: 'min(680px, 94vw)', background: '#23262b', color: '#e6e6e6', borderRadius: '8px',
+    padding: '14px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', boxSizing: 'border-box',
+    fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+  })
+  panel.addEventListener('mousedown', (e) => e.stopPropagation())
+  const head = document.createElement('div')
+  head.textContent = title || t('graph.hotkey.title')
+  Object.assign(head.style, { fontWeight: '600', color: '#fff', marginBottom: '10px' })
+  const preview = document.createElement('div')
+  Object.assign(preview.style, {
+    padding: '6px 8px', marginBottom: '10px', border: '1px solid rgba(255,255,255,0.14)',
+    borderRadius: '4px', color: '#dcdcaa', fontFamily: 'monospace', minHeight: '20px',
+  })
+  const updatePreview = () => { preview.textContent = formatHotkey(combo()) || t('graph.hotkey.placeholder') }
+  const keyButton = (label, onClick, active = false) => {
+    const b = document.createElement('button')
+    b.textContent = label
+    Object.assign(b.style, {
+      minWidth: '44px', padding: '6px 8px', border: '1px solid rgba(255,255,255,0.16)',
+      borderRadius: '4px', background: active ? '#2b6cb0' : '#343840', color: '#f4f4f4',
+      cursor: 'pointer', fontSize: '12px',
+    })
+    b.addEventListener('click', onClick)
+    return b
+  }
+  const label = (text) => {
+    const el = document.createElement('div')
+    el.textContent = text
+    Object.assign(el.style, { color: '#9fd0ff', fontSize: '12px', margin: '8px 0 4px' })
+    return el
+  }
+  const modWrap = document.createElement('div')
+  Object.assign(modWrap.style, { display: 'flex', flexWrap: 'wrap', gap: '6px' })
+  const renderMods = () => {
+    modWrap.replaceChildren()
+    for (const [key, name] of HOTKEY_MODIFIERS) {
+      const active = state.mods.includes(key)
+      modWrap.appendChild(keyButton(name, () => {
+        state.mods = active ? state.mods.filter((m) => m !== key) : [...state.mods, key]
+        renderMods(); updatePreview()
+      }, active))
+    }
+  }
+  const keyWrap = document.createElement('div')
+  Object.assign(keyWrap.style, { display: 'flex', flexDirection: 'column', gap: '6px' })
+  for (const row of HOTKEY_ROWS) {
+    const r = document.createElement('div')
+    Object.assign(r.style, { display: 'flex', flexWrap: 'wrap', gap: '6px' })
+    for (const k of row) r.appendChild(keyButton(k, () => save(normalizeHotkeyKey(k))))
+    keyWrap.appendChild(r)
+  }
+  const foot = document.createElement('div')
+  Object.assign(foot.style, { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' })
+  const clear = keyButton(t('graph.hotkey.clear'), () => { onSave(''); close() })
+  const cancel = keyButton(t('graph.hotkey.close'), close)
+  const apply = keyButton(t('graph.hotkey.apply'), () => save())
+  Object.assign(apply.style, { background: '#2b6cb0' })
+  foot.appendChild(clear); foot.appendChild(cancel); foot.appendChild(apply)
+  panel.appendChild(head); panel.appendChild(preview); panel.appendChild(label(t('graph.hotkey.modifiers')))
+  panel.appendChild(modWrap); panel.appendChild(label(t('graph.hotkey.keys'))); panel.appendChild(keyWrap); panel.appendChild(foot)
+  mask.appendChild(panel); document.body.appendChild(mask)
+  renderMods(); updatePreview()
+}
+
+function addHotkeyWidget(node, prop) {
+  const name = prop.name
+  const w = {
+    name, type: 'hotkey', value: prop.default ?? '', options: { property: name },
+    draw(ctx, node, width, y, H) {
+      if (node.flags && node.flags.collapsed) return
+      const m = 15
+      ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR
+      ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR
+      ctx.beginPath(); ctx.roundRect(m, y, width - m * 2, H, [H * 0.5]); ctx.fill(); ctx.stroke()
+      ctx.save(); ctx.beginPath(); ctx.rect(m, y, width - m * 2, H); ctx.clip()
+      ctx.fillStyle = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR
+      ctx.textAlign = 'left'
+      ctx.fillText(this.label || this.name, m * 2, y + H * 0.7)
+      const raw = String((node.properties && node.properties[this.name]) ?? this.value ?? '')
+      ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR
+      ctx.textAlign = 'right'
+      ctx.fillText((formatHotkey(raw) || t('graph.hotkey.placeholder')).substr(0, 34), width - m * 2, y + H * 0.7)
+      ctx.restore()
+    },
+    mouse(event, pos, node) {
+      if (event.type !== LiteGraph.pointerevents_method + 'down') return false
+      const cur = (node.properties && node.properties[this.name]) ?? this.value ?? ''
+      openHotkeyPicker(t('graph.hotkey.title'), cur, (v) => {
+        this.value = v
+        node.properties[this.name] = v
+        node.setDirtyCanvas(true, true)
+      })
+      return true
+    },
+  }
+  node.addCustomWidget(w)
+  return w
+}
+
 function addWidgetFor(node, prop) {
   const set = (v) => { node.properties[prop.name] = v }
   const name = prop.name
@@ -420,6 +578,8 @@ function addWidgetFor(node, prop) {
       addPasswordWidget(node, prop); break
     case 'multiline':
       addMultilineWidget(node, prop); break
+    case 'hotkey':
+      addHotkeyWidget(node, prop); break
     case 'image':
       break   // 模板图片：无文本框，由上传/粘贴按钮写入
     case 'string':

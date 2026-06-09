@@ -134,6 +134,7 @@ export default {
       'geom/to_point': 'To Point',
       'action/click': 'Click',
       'action/type': 'Type Text',
+      'action/hotkey': 'Shortcut',
       'action/scroll': 'Scroll',
       'action/drag': 'Drag',
       'wait/appear': 'Wait Appear',
@@ -198,6 +199,15 @@ export default {
       connection: 'Connection',
       description: 'Description',
       defaultValue: 'Default',
+    },
+    hotkey: {
+      title: 'Choose Shortcut',
+      modifiers: 'Modifiers',
+      keys: 'Keys',
+      apply: 'Apply',
+      clear: 'Clear',
+      close: 'Close',
+      placeholder: 'Click to choose',
     },
   },
   litegraph: {

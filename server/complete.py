@@ -30,6 +30,8 @@ _PREAMBLE = (
     "    def wait_vanish(self, template, timeout=10, mask=None) -> bool: ...\n"
     "    def click(self, target, button='left', double=False) -> None: ...\n"
     "    def type_text(self, text, paste=False) -> None: ...\n"
+    "    def hotkey(self, keys) -> None: ...\n"
+    "    def hold_keys(self, keys): ...\n"
     "    def scroll(self, target, dy=-1) -> None: ...\n"
     "    def drag(self, src, dst) -> None: ...\n"
     # 入参/结果：get_arg 标注返回 _Dev 以支持 get_arg('设备').方法 链式补全（设备是最常见用法）
