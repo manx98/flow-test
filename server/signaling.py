@@ -64,10 +64,9 @@ async def disconnect_device(sid: str):
 def _reuse_provider(project: str, lang: str = "zh"):
     """运行时设备解析：优先复用该工程同节点的 live-view 连接，否则新连(运行结束后由引擎关闭)。"""
     from .flow.engine import _default_device_provider
-    from .project import Project
+    from .project import load_settings
 
-    meta = Project(project).load_meta()
-    timeouts = meta.get("timeouts") or {}
+    timeouts = load_settings().get("timeouts") or {}
 
     def provider(device_node):
         sess = sessions.get_by_node(project, device_node["id"])

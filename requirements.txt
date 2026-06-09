@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 python-multipart  # FastAPI 图片上传
+python-docx       # AI 搭建读取 docx 测试用例文档
 aiortc            # WebRTC（视频 + DataChannel）
 av                # WebRTC 帧编码
 websockets        # WebSocket/异步通信依赖
@@ -22,7 +23,7 @@ pytesseract        # TesseractEngine（另需系统 tesseract 二进制）
 paddleocr          # PaddleEngine
 paddlepaddle       # PaddleEngine 运行时
 openai             # AIEngine（AI 找图/找文字；OpenAI 与 Ollama 共用，惰性导入）
-# pyperclip          # 本地后端 paste 走系统剪贴板
+pyperclip          # 本地后端 paste 走系统剪贴板
 cryptography       # noVNC 的 VNC 密码（DES）认证；服务器免密则不需要
 
 # —— 开发/测试 ——

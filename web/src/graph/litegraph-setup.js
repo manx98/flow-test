@@ -20,6 +20,10 @@ let captureHandler = null
 let imageActionHandler = null
 let maskActionHandler = null
 
+function requestGraphHistory(node) {
+  node?.graph?._requestHistory && node.graph._requestHistory()
+}
+
 export function setDeviceActionHandler(fn) { deviceActionHandler = fn }
 export function setCaptureHandler(fn) { captureHandler = fn }
 export function setImageActionHandler(fn) { imageActionHandler = fn }
@@ -66,6 +70,7 @@ function createAgentToolForExec(node) {
     if (a >= 0 && b >= 0) node.connect(a, tool, b)
   }
   node.setDirtyCanvas(true, true)
+  g._requestHistory && g._requestHistory()
 }
 
 function markI18nWidget(widget, key, prefix = '') {
@@ -221,8 +226,10 @@ function registerOne(spec) {
     if (value === this.properties[name]) return
     const prevValue = this.properties[name]
     this.properties[name] = value
+    let changed = true
     if (this.onPropertyChanged && this.onPropertyChanged(name, value, prevValue) === false) {
       this.properties[name] = prevValue
+      changed = false
     }
     if (this.widgets) {
       for (const w of this.widgets) {
@@ -233,6 +240,7 @@ function registerOne(spec) {
         }
       }
     }
+    if (changed) requestGraphHistory(this)
   }
   // 右键菜单顶部加「📖 组件说明」：弹窗展示描述 + 出入参 + 属性
   NodeClass.prototype.getExtraMenuOptions = function () {
@@ -302,6 +310,7 @@ function addPasswordWidget(node, prop) {
         this.value = v
         node.properties[this.name] = v
         node.setDirtyCanvas(true, true)
+        requestGraphHistory(node)
       }, event, false)
       // 编辑框按当前显隐决定是否用密码类型遮罩
       const input = dialog && dialog.querySelector && dialog.querySelector('input')
@@ -391,6 +400,7 @@ function addMultilineWidget(node, prop) {
         this.value = v
         node.properties[this.name] = v
         node.setDirtyCanvas(true, true)
+        requestGraphHistory(node)
       })
       return true
     },
@@ -549,6 +559,7 @@ function addHotkeyWidget(node, prop) {
         this.value = v
         node.properties[this.name] = v
         node.setDirtyCanvas(true, true)
+        requestGraphHistory(node)
       })
       return true
     },
@@ -558,7 +569,11 @@ function addHotkeyWidget(node, prop) {
 }
 
 function addWidgetFor(node, prop) {
-  const set = (v) => { node.properties[prop.name] = v }
+  const set = (v) => {
+    if (node.properties[prop.name] === v) return
+    node.properties[prop.name] = v
+    requestGraphHistory(node)
+  }
   const name = prop.name
   // 绑定到 properties[name]：反序列化后 LiteGraph 会据此把保存值回填到 widget（回显）
   const opt = (extra) => ({ property: name, ...(extra || {}) })
@@ -568,7 +583,12 @@ function addWidgetFor(node, prop) {
     case 'int':
       // LiteGraph 箭头/拖动步进 = delta * 0.1 * step，故 step:10 → 每次 ±1
       node.addWidget('number', name, prop.default ?? 0,
-        (v) => { node.properties[name] = Math.round(v) },
+        (v) => {
+          const next = Math.round(v)
+          if (node.properties[name] === next) return
+          node.properties[name] = next
+          requestGraphHistory(node)
+        },
         opt({ precision: 0, step: 10 })); break
     case 'bool':
       node.addWidget('toggle', name, !!prop.default, set, opt()); break

@@ -58,7 +58,11 @@ export class CodeOverlay {
       pre.innerHTML = highlightPython(ta.value)
       pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft
     }
-    const commit = () => { node.properties.code = ta.value; sync() }
+    const commit = () => {
+      node.properties.code = ta.value
+      sync()
+      node.graph?._requestHistory && node.graph._requestHistory()
+    }
     ta.addEventListener('input', commit)
     ta.addEventListener('scroll', () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft })
     const destroyCompletion = attachCompletion(ta, commit)

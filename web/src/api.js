@@ -18,7 +18,15 @@ export const api = {
     req('/api/complete', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ code, line, column }) }).then(d => d.completions),
   check: (code) =>
     req('/api/check', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ code }) }).then(d => d.errors),
+  aiDraft: (name, state, files = []) => {
+    const fd = new FormData()
+    fd.append('state', JSON.stringify(state || {}))
+    for (const f of files || []) fd.append('files', f, f.name)
+    return req(`/api/projects/${name}/ai/draft`, { method: 'POST', headers: langHeaders(), body: fd })
+  },
   // 工程
+  loadSettings: () => req('/api/settings', { headers: langHeaders() }).then(d => d.settings),
+  saveSettings: (settings) => req('/api/settings', { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ settings }) }),
   listProjects: () => req('/api/projects', { headers: langHeaders() }).then(d => d.projects),
   createProject: (name) => req('/api/projects', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ name }) }),
   deleteProject: (name) => req(`/api/projects/${name}`, { method: 'DELETE', headers: langHeaders() }),

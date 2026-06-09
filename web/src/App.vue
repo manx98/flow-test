@@ -7,11 +7,14 @@
         <option v-for="p in projects" :key="p" :value="p">{{ p }}</option>
       </select>
       <button @click="newProject">{{ t('app.toolbar.newProject') }}</button>
+      <button class="icon-btn" @click="undoGraph" :disabled="!canUndo" :title="t('app.toolbar.undoTitle')">↶</button>
+      <button class="icon-btn" @click="redoGraph" :disabled="!canRedo" :title="t('app.toolbar.redoTitle')">↷</button>
       <button @click="save" :disabled="!current">{{ t('app.toolbar.save') }}</button>
       <button @click="run" :disabled="!current || running">▶ {{ t('app.toolbar.run') }}</button>
       <button @click="stop" :disabled="!running">■ {{ t('app.toolbar.stop') }}</button>
       <button @click="openHistory" :disabled="!current">{{ t('app.toolbar.history') }}</button>
-      <button @click="openSettings" :disabled="!current">{{ t('app.toolbar.settings') }}</button>
+      <button @click="openSettings">{{ t('app.toolbar.settings') }}</button>
+      <button @click="openAiBuilder" :disabled="!current">{{ t('app.toolbar.aiBuilder') }}</button>
       <button class="locate-btn" @click="locateGraph" :title="t('app.toolbar.locateTitle')">{{ t('app.toolbar.locate') }}</button>
       <select class="lang-select" :value="locale" @change="changeLocale($event.target.value)">
         <option v-for="lang in languages" :key="lang.code" :value="lang.code">{{ lang.label }}</option>
@@ -85,6 +88,7 @@
         <div class="settings-dialog">
           <div class="settings-head">{{ t('app.settings.title') }}</div>
           <div class="settings-body">
+            <div class="settings-section">{{ t('app.settings.connectionSection') }}</div>
             <label>
               <span>{{ t('app.settings.rdpConnectTimeout') }}</span>
               <input type="number" min="5" max="300" step="5" v-model.number="settingsDraft.rdp_connect_timeout" />
@@ -92,6 +96,31 @@
             <label>
               <span>{{ t('app.settings.rdpFirstUpdateTimeout') }}</span>
               <input type="number" min="5" max="300" step="5" v-model.number="settingsDraft.rdp_first_update_timeout" />
+            </label>
+            <div class="settings-section">{{ t('app.settings.aiBuilderSection') }}</div>
+            <label>
+              <span>{{ t('app.settings.aiProvider') }}</span>
+              <select v-model="settingsDraft.ai_builder.provider">
+                <option value="openai">openai</option>
+                <option value="ollama">ollama</option>
+                <option value="custom">custom</option>
+              </select>
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiBaseUrl') }}</span>
+              <input v-model="settingsDraft.ai_builder.base_url" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiModel') }}</span>
+              <input v-model="settingsDraft.ai_builder.model" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiApiKey') }}</span>
+              <input type="password" v-model="settingsDraft.ai_builder.api_key" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiTemperature') }}</span>
+              <input type="number" min="0" max="2" step="0.1" v-model.number="settingsDraft.ai_builder.temperature" />
             </label>
           </div>
           <div class="settings-foot">
@@ -107,41 +136,128 @@
         </div>
       </div>
 
-      <div v-if="showHistory" class="drawer">
-        <div class="drawer-head">
-          <span>{{ t('app.history.title') }} - {{ current }}</span>
-          <span class="head-actions">
-            <button v-if="runs.length" class="clear" @click="clearRuns">{{ t('app.history.clear') }}</button>
-            <button @click="showHistory = false">×</button>
-          </span>
+      <div v-if="showHistory" class="history-modal" @mousedown.self="showHistory = false">
+        <div class="history-dialog">
+          <div class="history-head">
+            <span>{{ t('app.history.title') }} - {{ current }}</span>
+            <span class="head-actions">
+              <button v-if="runs.length" class="clear" @click="clearRuns">{{ t('app.history.clear') }}</button>
+              <button @click="showHistory = false">×</button>
+            </span>
+          </div>
+          <div class="history-body">
+            <aside class="history-runs">
+              <ul class="runs">
+                <li v-for="r in runs" :key="r" :class="{ active: r === selRun }" @click="selectRun(r)">
+                  <span class="rname">{{ r }}</span>
+                  <button class="del" :title="t('app.history.deleteTitle')" @click.stop="deleteRun(r)">🗑</button>
+                </li>
+                <li v-if="!runs.length" class="empty">{{ t('app.history.empty') }}</li>
+              </ul>
+            </aside>
+            <section class="history-report">
+              <div v-if="report" class="report">
+                <div class="rsum" :class="report.passed ? 'ok' : 'fail'">
+                  {{ report.passed ? '✅ ' + t('app.history.passed') : '❌ ' + t('app.history.failed') + ' ' + report.failed + '/' + report.total }} · {{ report.duration }}s
+                </div>
+                <div class="dls">
+                  <a :href="resultUrl(selRun, 'report.pdf')" target="_blank">PDF</a>
+                  <a :href="resultUrl(selRun, 'report.json')" target="_blank">JSON</a>
+                  <a :href="resultUrl(selRun, 'report.junit.xml')" target="_blank">JUnit</a>
+                </div>
+                <table class="atable">
+                  <tr v-for="(a, idx) in report.asserts" :key="idx" :class="a.ok ? 'ok' : 'fail'">
+                    <td>{{ a.ok ? '✓' : '✗' }}</td><td>{{ a.message }}</td><td>n{{ a.node }}</td>
+                  </tr>
+                </table>
+                <div v-for="(a, idx) in failedEvidence" :key="'e' + idx" class="evid">
+                  <div class="ecap">{{ t('app.history.evidence') }} · {{ a.message }}</div>
+                  <img :src="a.evidence" />
+                </div>
+                <pre v-if="report.logs && report.logs.length" class="logs">{{ report.logs.join('\n') }}</pre>
+              </div>
+              <div v-else class="history-empty">{{ runs.length ? t('app.history.selectPrompt') : t('app.history.empty') }}</div>
+            </section>
+          </div>
         </div>
-        <div class="drawer-body">
-          <ul class="runs">
-            <li v-for="r in runs" :key="r" :class="{ active: r === selRun }" @click="selectRun(r)">
-              <span class="rname">{{ r }}</span>
-              <button class="del" :title="t('app.history.deleteTitle')" @click.stop="deleteRun(r)">🗑</button>
-            </li>
-            <li v-if="!runs.length" class="empty">{{ t('app.history.empty') }}</li>
-          </ul>
-          <div v-if="report" class="report">
-            <div class="rsum" :class="report.passed ? 'ok' : 'fail'">
-              {{ report.passed ? '✅ ' + t('app.history.passed') : '❌ ' + t('app.history.failed') + ' ' + report.failed + '/' + report.total }} · {{ report.duration }}s
+      </div>
+
+      <div v-if="showAiBuilder" class="drawer ai-builder">
+        <div class="drawer-head">
+          <span>{{ t('app.aiBuilder.title') }} - {{ current }}</span>
+          <button @click="showAiBuilder = false">×</button>
+        </div>
+        <div class="ai-builder-body">
+          <div class="ai-chat">
+            <div v-for="(m, idx) in aiMessages" :key="idx" class="ai-msg" :class="m.role">
+              <div class="ai-role">{{ m.role === 'user' ? t('app.aiBuilder.user') : t('app.aiBuilder.assistant') }}</div>
+              <div v-if="m.content" class="ai-text">{{ m.content }}</div>
+              <div v-if="m.files && m.files.length" class="ai-files">
+                <span v-for="f in m.files" :key="f">{{ f }}</span>
+              </div>
+              <div v-if="m.form" class="ai-form">
+                <div class="ai-form-title">{{ m.form.title }}</div>
+                <div v-if="m.form.description" class="ai-form-desc">{{ m.form.description }}</div>
+                <template v-if="m.form.kind === 'device'">
+                  <label>
+                    <span>{{ t('app.aiBuilder.deviceType') }}</span>
+                    <select v-model="m.form.values.type" :disabled="m.form.submitted">
+                      <option v-for="d in m.form.devices" :key="d.type" :value="d.type">{{ d.title }}</option>
+                    </select>
+                  </label>
+                  <label v-for="p in deviceFormProps(m.form)" :key="p.name">
+                    <span>{{ p.name }}</span>
+                    <select v-if="p.type === 'enum'" v-model="m.form.values.properties[p.name]" :disabled="m.form.submitted">
+                      <option v-for="opt in p.options || []" :key="opt" :value="opt">{{ opt }}</option>
+                    </select>
+                    <input v-else-if="p.type === 'bool'" type="checkbox" v-model="m.form.values.properties[p.name]" :disabled="m.form.submitted" />
+                    <input v-else :type="formInputType(p.type)" v-model="m.form.values.properties[p.name]" :disabled="m.form.submitted" />
+                    <small>{{ p.desc }}</small>
+                  </label>
+                </template>
+                <template v-else>
+                  <label v-for="f in m.form.fields" :key="f.name">
+                    <span>{{ f.label }}</span>
+                    <select v-if="f.type === 'enum'" v-model="m.form.values[f.name]" :disabled="m.form.submitted">
+                      <option v-for="opt in f.options || []" :key="opt" :value="opt">{{ opt }}</option>
+                    </select>
+                    <input v-else-if="f.type === 'bool'" type="checkbox" v-model="m.form.values[f.name]" :disabled="m.form.submitted" />
+                    <input v-else :type="formInputType(f.type)" v-model="m.form.values[f.name]" :disabled="m.form.submitted" />
+                  </label>
+                </template>
+                <button class="primary" @click="submitAiForm(m.form)" :disabled="m.form.submitted || aiSending">
+                  {{ m.form.submitted ? t('app.aiBuilder.submitted') : (m.form.submit_label || t('app.aiBuilder.continue')) }}
+                </button>
+              </div>
             </div>
-            <div class="dls">
-              <a :href="resultUrl(selRun, 'report.pdf')" target="_blank">PDF</a>
-              <a :href="resultUrl(selRun, 'report.json')" target="_blank">JSON</a>
-              <a :href="resultUrl(selRun, 'report.junit.xml')" target="_blank">JUnit</a>
+          </div>
+
+          <div v-if="aiDraft" class="ai-draft">
+            <div class="ai-draft-head">
+              <strong>{{ aiDraft.title }}</strong>
+              <span>{{ tr('app.aiBuilder.stats', aiDraft.stats || {}) }}</span>
             </div>
-            <table class="atable">
-              <tr v-for="(a, idx) in report.asserts" :key="idx" :class="a.ok ? 'ok' : 'fail'">
-                <td>{{ a.ok ? '✓' : '✗' }}</td><td>{{ a.message }}</td><td>n{{ a.node }}</td>
-              </tr>
-            </table>
-            <div v-for="(a, idx) in failedEvidence" :key="'e' + idx" class="evid">
-              <div class="ecap">{{ t('app.history.evidence') }} · {{ a.message }}</div>
-              <img :src="a.evidence" />
+            <div v-if="aiDraft.summary" class="ai-draft-summary">{{ aiDraft.summary }}</div>
+            <ol>
+              <li v-for="(s, i) in aiDraftSteps" :key="i">{{ stepLabel(s) }}</li>
+            </ol>
+            <div v-for="note in aiDraft.notes || []" :key="note" class="ai-note">{{ note }}</div>
+            <button class="primary" @click="applyAiDraft">{{ t('app.aiBuilder.apply') }}</button>
+          </div>
+
+          <div class="ai-compose">
+            <input ref="aiFileInput" type="file" multiple accept=".txt,.md,.json,.csv,.docx" @change="onAiFiles" hidden />
+            <div v-if="aiFiles.length" class="ai-files selected">
+              <span v-for="f in aiFiles" :key="f.name">{{ f.name }}</span>
+              <button @click="aiFiles = []">{{ t('app.aiBuilder.clearFiles') }}</button>
             </div>
-            <pre v-if="report.logs && report.logs.length" class="logs">{{ report.logs.join('\n') }}</pre>
+            <textarea v-model="aiInput" :placeholder="t('app.aiBuilder.placeholder')" @keydown.ctrl.enter.prevent="sendAiMessage"></textarea>
+            <div class="ai-compose-actions">
+              <button @click="aiFileInput && aiFileInput.click()">{{ t('app.aiBuilder.upload') }}</button>
+              <button class="primary" @click="sendAiMessage" :disabled="aiSending || (!aiInput.trim() && !aiFiles.length)">
+                {{ aiSending ? t('app.aiBuilder.generating') : t('app.aiBuilder.send') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -151,7 +267,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { LGraph, LGraphCanvas, LiteGraph } from 'litegraph.js'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
@@ -170,13 +286,23 @@ import { DeviceConnection } from './webrtc/device.js'
 const projects = ref([])
 const current = ref('')
 const status = ref('')
-const projectMeta = ref({})
 const DEFAULT_TIMEOUT_SETTINGS = {
   rdp_connect_timeout: 60,
   rdp_first_update_timeout: 30,
 }
+const DEFAULT_AI_BUILDER_SETTINGS = {
+  provider: 'openai',
+  base_url: '',
+  model: 'gpt-4o',
+  api_key: '',
+  temperature: 0,
+}
 const timeoutSettings = ref({ ...DEFAULT_TIMEOUT_SETTINGS })
-const settingsDraft = ref({ ...DEFAULT_TIMEOUT_SETTINGS })
+const aiBuilderSettings = ref({ ...DEFAULT_AI_BUILDER_SETTINGS })
+const settingsDraft = ref({
+  ...DEFAULT_TIMEOUT_SETTINGS,
+  ai_builder: { ...DEFAULT_AI_BUILDER_SETTINGS },
+})
 const showSettings = ref(false)
 
 // 组件栏（侧边可折叠节点面板）
@@ -269,6 +395,158 @@ const running = ref(false)
 const lastResult = ref(null)
 let runWs = null
 
+// Graph 撤销/重做：保存结构化快照，运行期颜色/错误等临时状态不入历史。
+const undoStack = ref([])
+const redoStack = ref([])
+const canUndo = computed(() => undoStack.value.length > 1)
+const canRedo = computed(() => redoStack.value.length > 0)
+const GRAPH_HISTORY_LIMIT = 80
+let historyTimer = null
+let historyRestoring = false
+let lastHistoryJson = ''
+
+function cleanGraphForHistory(data) {
+  const copy = JSON.parse(JSON.stringify(data || {}))
+  for (const node of copy.nodes || []) {
+    delete node.color
+    delete node.bgcolor
+    delete node._error
+  }
+  return copy
+}
+
+function graphHistoryJson() {
+  if (!graph) return ''
+  return JSON.stringify(cleanGraphForHistory(graph.serialize()))
+}
+
+function resetGraphHistory() {
+  clearTimeout(historyTimer)
+  historyTimer = null
+  const json = graphHistoryJson()
+  lastHistoryJson = json
+  undoStack.value = json ? [json] : []
+  redoStack.value = []
+}
+
+function scheduleGraphHistory() {
+  if (!graph || historyRestoring) return
+  clearTimeout(historyTimer)
+  historyTimer = setTimeout(pushGraphHistoryNow, 250)
+}
+
+function flushGraphHistory() {
+  if (!historyTimer) return
+  clearTimeout(historyTimer)
+  historyTimer = null
+  pushGraphHistoryNow()
+}
+
+function pushGraphHistoryNow() {
+  if (!graph || historyRestoring) return
+  const json = graphHistoryJson()
+  if (!json || json === lastHistoryJson) return
+  lastHistoryJson = json
+  const stack = [...undoStack.value, json]
+  if (stack.length > GRAPH_HISTORY_LIMIT) stack.splice(0, stack.length - GRAPH_HISTORY_LIMIT)
+  undoStack.value = stack
+  redoStack.value = []
+}
+
+function cleanupGraphRuntime() {
+  if (!graph) return
+  for (const node of graph._nodes.slice()) {
+    if (node._conn) {
+      try {
+        const closing = node._conn.close()
+        if (closing?.catch) closing.catch(() => {})
+      } catch (_) {}
+      node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._conn = null)
+    }
+    if (node._connecting) node.setDeviceConnectionState ? node.setDeviceConnectionState({ connecting: false }) : (node._connecting = false)
+    try { overlay && overlay.detach(node) } catch (_) {}
+    try { shots && shots.clear && shots.clear(node) } catch (_) {}
+  }
+  try { codes && codes.update([]) } catch (_) {}
+  try { errors && errors.update([]) } catch (_) {}
+  try { agentTrace && agentTrace.clearAll && agentTrace.clearAll() } catch (_) {}
+}
+
+function restoreGraphHistory(json) {
+  if (!graph || !json) return
+  historyRestoring = true
+  try {
+    cleanupGraphRuntime()
+    graph.configure(JSON.parse(json))
+    refreshGraphI18n()
+    reloadShots()
+    lastHistoryJson = json
+    lgcanvas && lgcanvas.setDirty(true, true)
+  } finally {
+    historyRestoring = false
+  }
+}
+
+function undoGraph() {
+  flushGraphHistory()
+  if (!canUndo.value) return
+  const stack = [...undoStack.value]
+  const currentJson = stack.pop()
+  const previousJson = stack[stack.length - 1]
+  undoStack.value = stack
+  redoStack.value = currentJson ? [currentJson, ...redoStack.value] : redoStack.value
+  restoreGraphHistory(previousJson)
+}
+
+function redoGraph() {
+  flushGraphHistory()
+  if (!canRedo.value) return
+  const [nextJson, ...rest] = redoStack.value
+  undoStack.value = [...undoStack.value, nextJson]
+  redoStack.value = rest
+  restoreGraphHistory(nextJson)
+}
+
+function installGraphHistoryHooks() {
+  if (!graph) return
+  graph._requestHistory = scheduleGraphHistory
+  const prevChange = graph.on_change
+  graph.on_change = function (...args) {
+    prevChange && prevChange.apply(this, args)
+    scheduleGraphHistory()
+  }
+  const prevAfterChange = graph.onAfterChange
+  graph.onAfterChange = function (...args) {
+    prevAfterChange && prevAfterChange.apply(this, args)
+    scheduleGraphHistory()
+  }
+  const prevConnectionChange = graph.onConnectionChange
+  graph.onConnectionChange = function (...args) {
+    prevConnectionChange && prevConnectionChange.apply(this, args)
+    scheduleGraphHistory()
+  }
+}
+
+function isTextEditingTarget(el) {
+  if (!el) return false
+  const tag = el.tagName?.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el.isContentEditable
+}
+
+function onGlobalKeyDown(ev) {
+  if (isTextEditingTarget(ev.target)) return
+  const mod = ev.ctrlKey || ev.metaKey
+  if (!mod) return
+  const key = ev.key.toLowerCase()
+  if (key === 'z' && !ev.shiftKey) {
+    ev.preventDefault()
+    undoGraph()
+  } else if (key === 'y' || (key === 'z' && ev.shiftKey)) {
+    ev.preventDefault()
+    redoGraph()
+  }
+}
+
 // 运行期「提示」节点弹出的 toast
 const toasts = ref([])
 let toastSeq = 0
@@ -318,6 +596,210 @@ async function clearRuns() {
     status.value = tr('app.status.clearedRuns', { count: deleted })
   } catch (e) { alert(tr('app.alerts.clearFailed', { message: e.message })) }
 }
+
+// AI 辅助流程搭建
+const showAiBuilder = ref(false)
+const aiMessages = ref([])
+const aiInput = ref('')
+const aiFiles = ref([])
+const aiFileInput = ref(null)
+const aiSending = ref(false)
+const aiDraft = ref(null)
+const aiFormValues = ref({})
+const aiDraftSteps = computed(() => aiDraft.value?.dsl?.steps || [])
+
+function openAiBuilder() {
+  if (!current.value) { alert(t('app.alerts.openProjectFirst')); return }
+  showAiBuilder.value = true
+  if (!aiMessages.value.length) {
+    aiMessages.value.push({ role: 'assistant', content: t('app.aiBuilder.welcome') })
+  }
+}
+
+function onAiFiles(ev) {
+  aiFiles.value = Array.from(ev.target.files || [])
+  ev.target.value = ''
+}
+
+async function sendAiMessage() {
+  await requestAiDraft(aiInput.value.trim(), aiFiles.value, true)
+}
+
+async function requestAiDraft(message, files = [], pushUser = false) {
+  if (!current.value || aiSending.value) return
+  if (pushUser && !message && !files.length) return
+  if (pushUser) {
+    aiMessages.value.push({
+      role: 'user',
+      content: message,
+      files: files.map((f) => f.name),
+    })
+    aiInput.value = ''
+    aiFiles.value = []
+  }
+  aiSending.value = true
+  try {
+    const state = {
+      message,
+      history: aiMessages.value
+        .filter((m) => m.content)
+        .map((m) => ({ role: m.role, content: m.content }))
+        .slice(-20),
+      draft_dsl: aiDraft.value?.dsl || null,
+      current_graph: graph.serialize(),
+      ai_settings: aiBuilderSettings.value,
+      form_values: aiFormValues.value,
+    }
+    const res = await api.aiDraft(current.value, state, files)
+    if (res.message) aiMessages.value.push({ role: 'assistant', content: res.message })
+    for (const form of res.forms || []) {
+      aiMessages.value.push({ role: 'assistant', content: '', form: hydrateAiForm(form) })
+    }
+    if (res.draft) {
+      aiDraft.value = res.draft
+      status.value = t('app.status.aiDraftReady')
+    }
+  } catch (e) {
+    aiMessages.value.push({ role: 'assistant', content: tr('app.aiBuilder.error', { message: e.message }) })
+  } finally {
+    aiSending.value = false
+  }
+}
+
+function hydrateAiForm(form) {
+  const f = { ...form, submitted: false }
+  if (f.kind === 'device') {
+    f.values = { type: f.type || f.devices?.[0]?.type || 'device/rdp', properties: {} }
+    fillDeviceDefaults(f)
+  } else {
+    f.values = {}
+    for (const field of f.fields || []) f.values[field.name] = field.default ?? ''
+  }
+  return f
+}
+
+function deviceFormProps(form) {
+  fillDeviceDefaults(form)
+  return form._selectedProps || []
+}
+
+function fillDeviceDefaults(form) {
+  const spec = (form.devices || []).find((d) => d.type === form.values?.type) || (form.devices || [])[0]
+  form._selectedProps = spec?.properties || []
+  form.values ||= { type: spec?.type || 'device/rdp', properties: {} }
+  form.values.properties ||= {}
+  for (const p of form._selectedProps) {
+    if (!(p.name in form.values.properties)) form.values.properties[p.name] = p.default ?? ''
+  }
+}
+
+function formInputType(type) {
+  if (type === 'password') return 'password'
+  if (type === 'int' || type === 'number') return 'number'
+  return 'text'
+}
+
+async function submitAiForm(form) {
+  if (form.submitted) return
+  const values = normalizeAiFormValues(form)
+  aiFormValues.value = { ...aiFormValues.value, [form.id]: values }
+  form.submitted = true
+  aiMessages.value.push({ role: 'user', content: tr('app.aiBuilder.formSubmitted', { title: form.title }) })
+  await requestAiDraft('', [], false)
+}
+
+function normalizeAiFormValues(form) {
+  if (form.kind === 'device') {
+    fillDeviceDefaults(form)
+    const props = {}
+    for (const p of form._selectedProps || []) props[p.name] = normalizeFormValue(form.values.properties[p.name], p.type)
+    return { type: form.values.type, properties: props }
+  }
+  const out = {}
+  for (const f of form.fields || []) out[f.name] = normalizeFormValue(form.values[f.name], f.type)
+  return out
+}
+
+function normalizeFormValue(value, type) {
+  if (type === 'bool') return !!value
+  if (type === 'int') {
+    const n = parseInt(value, 10)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (type === 'number') {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : 0
+  }
+  return value ?? ''
+}
+
+function stepLabel(step) {
+  const action = step.action || ''
+  const target = step.text || step.description || step.message || step.keys || ''
+  return t(`app.aiBuilder.actions.${action}`, action) + (target ? `: ${target}` : '')
+}
+
+function resolveDraftNode(ref, created) {
+  if (!ref) return null
+  if (String(ref).startsWith('external:')) {
+    const id = Number(String(ref).slice('external:'.length))
+    return graph.getNodeById(id)
+  }
+  return created.get(ref) || null
+}
+
+function connectByName(src, outName, dst, inName) {
+  if (!src || !dst) return false
+  const outSlot = src.findOutputSlot(outName)
+  const inSlot = dst.findInputSlot(inName)
+  if (outSlot < 0 || inSlot < 0) return false
+  src.connect(outSlot, dst, inSlot)
+  return true
+}
+
+function applyAiDraft() {
+  if (!aiDraft.value || !graph) return
+  const draft = aiDraft.value
+  const created = new Map()
+  const minX = Math.min(...(draft.nodes || []).map((n) => n.pos?.[0] ?? 0), 0)
+  const minY = Math.min(...(draft.nodes || []).map((n) => n.pos?.[1] ?? 0), 0)
+  let maxX = 80
+  for (const n of graph._nodes || []) maxX = Math.max(maxX, n.pos[0] + (n.size?.[0] || 180))
+  const offsetX = maxX + 80 - minX
+  const offsetY = 80 - minY
+
+  for (const spec of draft.nodes || []) {
+    const node = LiteGraph.createNode(spec.type)
+    if (!node) continue
+    node.pos = [(spec.pos?.[0] ?? 0) + offsetX, (spec.pos?.[1] ?? 0) + offsetY]
+    for (const [key, value] of Object.entries(spec.properties || {})) {
+      if (node.setProperty) node.setProperty(key, value)
+      else node.properties[key] = value
+    }
+    graph.add(node)
+    created.set(spec.id, node)
+  }
+
+  for (const link of draft.links || []) {
+    const src = resolveDraftNode(link.from, created)
+    const dst = resolveDraftNode(link.to, created)
+    connectByName(src, link.out, dst, link.in)
+  }
+
+  if (draft.auto_connect_start && draft.entry) {
+    const start = graph.getNodeById(Number(draft.auto_connect_start))
+    const entry = resolveDraftNode(draft.entry, created)
+    const outSlot = start?.findOutputSlot('out')
+    const out = outSlot >= 0 ? start.outputs?.[outSlot] : null
+    if (start && entry && !(out?.links || []).length) connectByName(start, 'out', entry, 'in')
+  }
+
+  refreshGraphI18n()
+  lgcanvas && lgcanvas.setDirty(true, true)
+  locateGraph()
+  scheduleGraphHistory()
+  status.value = t('app.status.aiDraftApplied')
+}
 const stage = ref(null)
 const canvasEl = ref(null)
 const overlayEl = ref(null)
@@ -338,9 +820,11 @@ onMounted(async () => {
   applyNodeTypeTitles()
 
   graph = new LGraph()
+  installGraphHistoryHooks()
   lgcanvas = new LGraphCanvas(canvasEl.value, graph)
   resize()
   window.addEventListener('resize', resize)
+  window.addEventListener('keydown', onGlobalKeyDown)
 
   overlay = new VideoOverlay(lgcanvas, overlayEl.value)
   shots = new ShotOverlay(lgcanvas, overlayEl.value)
@@ -365,8 +849,16 @@ onMounted(async () => {
   setMaskActionHandler(onMaskEdit)
 
   graph.start()
+  await loadGlobalSettings()
   projects.value = await api.listProjects()
   status.value = t('app.status.ready')
+  resetGraphHistory()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', resize)
+  window.removeEventListener('keydown', onGlobalKeyDown)
+  clearTimeout(historyTimer)
 })
 
 function applyNodeTypeTitles() {
@@ -409,21 +901,31 @@ async function openProject() {
     overlay.detach(node)
   }
   const data = await api.loadFlow(current.value)
-  graph.configure(data)
-  await loadProjectMeta()
-  applyRdpTimeoutsToNodes(timeoutSettings.value)
+  historyRestoring = true
+  try {
+    graph.configure(data)
+  } finally {
+    historyRestoring = false
+  }
+  aiFormValues.value = {}
+  aiDraft.value = null
+  aiMessages.value = []
+  applyRdpTimeoutsToNodes(timeoutSettings.value, { recordHistory: false })
   refreshGraphI18n()
   reloadShots()
+  resetGraphHistory()
   status.value = tr('app.status.opened', { name: current.value })
 }
 
-async function loadProjectMeta() {
+async function loadGlobalSettings() {
+  let settings = {}
   try {
-    projectMeta.value = await api.loadMeta(current.value)
+    settings = await api.loadSettings()
   } catch (_) {
-    projectMeta.value = {}
+    settings = {}
   }
-  timeoutSettings.value = normalizeTimeoutSettings(projectMeta.value.timeouts)
+  timeoutSettings.value = normalizeTimeoutSettings(settings.timeouts)
+  aiBuilderSettings.value = normalizeAiBuilderSettings(settings.ai_builder)
 }
 
 function normalizeTimeoutSettings(raw = {}) {
@@ -439,8 +941,12 @@ function clampTimeout(value, fallback) {
   return Math.min(300, Math.max(5, n))
 }
 
-function openSettings() {
-  settingsDraft.value = { ...timeoutSettings.value }
+async function openSettings() {
+  await loadGlobalSettings()
+  settingsDraft.value = {
+    ...timeoutSettings.value,
+    ai_builder: { ...aiBuilderSettings.value },
+  }
   showSettings.value = true
 }
 
@@ -449,23 +955,45 @@ function closeSettings() {
 }
 
 async function saveSettings() {
-  const next = normalizeTimeoutSettings(settingsDraft.value)
-  timeoutSettings.value = next
-  projectMeta.value = { ...projectMeta.value, timeouts: next }
-  await api.saveMeta(current.value, projectMeta.value)
-  applyRdpTimeoutsToNodes(next)
+  const nextTimeouts = normalizeTimeoutSettings(settingsDraft.value)
+  const nextAi = normalizeAiBuilderSettings(settingsDraft.value.ai_builder)
+  timeoutSettings.value = nextTimeouts
+  aiBuilderSettings.value = nextAi
+  await api.saveSettings({ timeouts: nextTimeouts, ai_builder: nextAi })
+  applyRdpTimeoutsToNodes(nextTimeouts)
   showSettings.value = false
   status.value = t('app.status.settingsSaved')
 }
 
-function applyRdpTimeoutsToNodes(settings) {
+function normalizeAiBuilderSettings(raw = {}) {
+  const provider = ['openai', 'ollama', 'custom'].includes(raw.provider) ? raw.provider : DEFAULT_AI_BUILDER_SETTINGS.provider
+  return {
+    provider,
+    base_url: String(raw.base_url ?? DEFAULT_AI_BUILDER_SETTINGS.base_url),
+    model: String(raw.model ?? DEFAULT_AI_BUILDER_SETTINGS.model),
+    api_key: String(raw.api_key ?? DEFAULT_AI_BUILDER_SETTINGS.api_key),
+    temperature: clampAiTemperature(raw.temperature, DEFAULT_AI_BUILDER_SETTINGS.temperature),
+  }
+}
+
+function clampAiTemperature(value, fallback) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(2, Math.max(0, n))
+}
+
+function applyRdpTimeoutsToNodes(settings, options = {}) {
   if (!graph) return
+  let changed = false
   for (const node of graph._nodes || []) {
     if (node._spec?.type !== 'device/rdp' || node._conn || node._connecting) continue
+    const before = JSON.stringify(node.properties || {})
     node.setProperty('connect_timeout', settings.rdp_connect_timeout)
     node.setProperty('first_update_timeout', settings.rdp_first_update_timeout)
+    if (JSON.stringify(node.properties || {}) !== before) changed = true
   }
   lgcanvas && lgcanvas.setDirty(true, true)
+  if (options.recordHistory !== false && changed) scheduleGraphHistory()
 }
 
 // 工程打开后，把模板图片 / 遮罩节点的图重新载入回显。
@@ -497,6 +1025,7 @@ async function onImageAction(node, mode) {
     const r = await api.uploadImage(current.value, file, fname)
     node.properties.name = r.name
     shots.setImage(node, api.imageUrl(current.value, r.name), { fit: true })
+    scheduleGraphHistory()
     status.value = tr('app.status.templateSet', { name: r.name })
   } catch (e) {
     alert(tr('app.alerts.setTemplateFailed', { message: e.message }))
@@ -511,6 +1040,7 @@ async function onRenameImage(node, newName) {
   const r = await api.renameImage(current.value, old, newName)
   node.properties[key] = r.name
   shots.setImage(node, api.imageUrl(current.value, r.name))
+  scheduleGraphHistory()
   status.value = tr('app.status.renamed', { name: r.name })
 }
 
@@ -698,6 +1228,7 @@ async function saveCrop() {
     n.pos = a ? [a.pos[0] + a.size[0] + 40, a.pos[1]] : [120, 120]
     graph.add(n)
     shots.setImage(n, api.imageUrl(current.value, r.name), { fit: true })
+    scheduleGraphHistory()
     status.value = tr('app.status.templateCreated', { name: r.name })
     closeCropper()
   } catch (e) {
@@ -819,6 +1350,7 @@ async function saveMask() {
     const r = await api.uploadImage(current.value, blob, name)
     maskAnchor.properties.mask = r.name
     shots.setImage(maskAnchor, api.imageUrl(current.value, r.name), { fit: true })
+    scheduleGraphHistory()
     status.value = tr('app.status.maskSaved', { name: r.name })
     closeMask()
   } catch (e) {
@@ -950,6 +1482,12 @@ textarea, .graphdialog textarea {
 .toolbar .locate-btn {
   min-width: 44px;
 }
+.toolbar .icon-btn {
+  width: 28px;
+  min-width: 28px;
+  padding: 3px 0;
+  font-size: 16px;
+}
 .toolbar .dl { color: #6cf; font-size: 12px; text-decoration: underline; }
 .toolbar .status { margin-left: auto; color: #9c9; font-size: 12px; }
 .body { display: flex; flex: 1; min-height: 0; }
@@ -978,6 +1516,22 @@ textarea, .graphdialog textarea {
   background: #2b6cb0; }
 .toast.warn { background: #b7791f; }
 .toast.error { background: #c0392b; }
+
+.history-modal { position: absolute; inset: 0; z-index: 310; background: rgba(0,0,0,.58);
+  display: flex; align-items: center; justify-content: center; padding: 22px; box-sizing: border-box; }
+.history-dialog { width: min(920px, 96vw); height: min(680px, 90vh); background: #1f1f1f; color: #ddd;
+  border-radius: 6px; display: flex; flex-direction: column; box-shadow: 0 10px 34px rgba(0,0,0,.62);
+  font-size: 13px; overflow: hidden; }
+.history-head { display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; background: #2b2b2b; border-bottom: 1px solid #151515; }
+.history-head button { background: none; color: #ccc; border: none; font-size: 18px; cursor: pointer; }
+.history-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr; }
+.history-runs { min-width: 0; border-right: 1px solid #333; background: #191919; overflow: hidden;
+  display: flex; flex-direction: column; }
+.history-runs .runs { flex: 1; max-height: none; border: 0; overflow: auto; }
+.history-report { min-width: 0; overflow: auto; padding: 10px; }
+.history-empty { height: 100%; min-height: 180px; display: flex; align-items: center; justify-content: center;
+  color: #777; border: 1px dashed #3a3a3a; border-radius: 6px; box-sizing: border-box; }
 
 .drawer { position: absolute; top: 0; right: 0; width: 380px; height: 100%;
   background: #1f1f1f; color: #ddd; box-shadow: -2px 0 8px rgba(0,0,0,.5);
@@ -1009,6 +1563,44 @@ textarea, .graphdialog textarea {
 .evid img { max-width: 100%; border: 1px solid #444; }
 .logs { background: #111; padding: 6px; overflow: auto; white-space: pre-wrap; color: #9b9; }
 
+.ai-builder { width: 440px; max-width: min(440px, 96vw); }
+.ai-builder-body { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.ai-chat { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ai-msg { border: 1px solid #333; background: #242424; border-radius: 6px; padding: 8px; }
+.ai-msg.user { background: #24313a; border-color: #38515f; }
+.ai-role { color: #9fd0ff; font-size: 11px; margin-bottom: 4px; }
+.ai-text { white-space: pre-wrap; line-height: 1.45; }
+.ai-files { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.ai-files span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid #405260; color: #cfe8f6; border-radius: 4px; padding: 2px 6px; font-size: 12px; }
+.ai-files.selected { margin: 0; }
+.ai-files.selected button { border: none; background: #3a3a3a; color: #ddd; border-radius: 4px; cursor: pointer; }
+.ai-form { display: flex; flex-direction: column; gap: 8px; }
+.ai-form-title { font-weight: 700; color: #fff; }
+.ai-form-desc, .ai-note { color: #aaa; font-size: 12px; line-height: 1.4; }
+.ai-form label { display: grid; grid-template-columns: 96px 1fr; gap: 6px; align-items: center; }
+.ai-form label small { grid-column: 2; color: #888; line-height: 1.35; }
+.ai-form input:not([type="checkbox"]), .ai-form select, .ai-compose textarea {
+  box-sizing: border-box; width: 100%; background: #101010; color: #eee; border: 1px solid #444;
+  border-radius: 4px; padding: 5px 7px; font: 13px system-ui, sans-serif;
+}
+.ai-form input[type="checkbox"] { justify-self: start; }
+.ai-form button, .ai-draft button, .ai-compose-actions button {
+  padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; background: #3a3a3a; color: #ddd;
+}
+.ai-form button:disabled, .ai-compose-actions button:disabled { cursor: default; opacity: .55; }
+.ai-form .primary, .ai-draft .primary, .ai-compose-actions .primary { background: #2b6cb0; color: #fff; }
+.ai-draft { flex: 0 0 auto; max-height: 240px; overflow: auto; border-top: 1px solid #333; border-bottom: 1px solid #333;
+  padding: 10px; background: #1a1d20; display: flex; flex-direction: column; gap: 6px; }
+.ai-draft-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.ai-draft-head span { color: #9fb4c0; font-size: 12px; white-space: nowrap; }
+.ai-draft-summary { color: #ddd; line-height: 1.4; }
+.ai-draft ol { margin: 0; padding-left: 20px; }
+.ai-draft li { padding: 2px 0; }
+.ai-compose { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #202020; }
+.ai-compose textarea { min-height: 86px; resize: vertical; line-height: 1.45; }
+.ai-compose-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* 截图裁剪弹框 */
 .crop-modal { position: absolute; inset: 0; z-index: 300; background: rgba(0,0,0,.6);
   display: flex; align-items: center; justify-content: center; }
@@ -1031,14 +1623,22 @@ textarea, .graphdialog textarea {
 /* 工程设置 */
 .settings-modal { position: absolute; inset: 0; z-index: 320; background: rgba(0,0,0,.55);
   display: flex; align-items: center; justify-content: center; }
-.settings-dialog { width: min(420px, 92vw); background: #1f1f1f; color: #ddd;
+.settings-dialog { width: min(560px, 92vw); background: #1f1f1f; color: #ddd;
   border-radius: 6px; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
 .settings-head { padding: 8px 12px; background: #2b2b2b; font-size: 13px; border-radius: 6px 6px 0 0; }
 .settings-body { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
-.settings-body label { display: grid; grid-template-columns: 1fr 120px; gap: 12px; align-items: center; font-size: 13px; }
-.settings-body input { box-sizing: border-box; width: 100%; background: #111; color: #eee;
+.settings-section { color: #9fd0ff; font-size: 12px; padding-top: 4px; border-top: 1px solid #333; }
+.settings-section:first-child { border-top: 0; padding-top: 0; }
+.settings-body label { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: center; font-size: 13px; }
+.settings-body input, .settings-body select { box-sizing: border-box; width: 100%; background: #111; color: #eee;
   border: 1px solid #444; border-radius: 4px; padding: 4px 6px; }
 .settings-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; background: #262626; }
 .settings-foot button { padding: 4px 12px; }
 .settings-foot .primary { background: #2b6cb0; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+
+@media (max-width: 720px) {
+  .history-dialog { height: min(720px, 94vh); }
+  .history-body { grid-template-columns: 1fr; grid-template-rows: minmax(150px, 32%) 1fr; }
+  .history-runs { border-right: 0; border-bottom: 1px solid #333; }
+}
 </style>

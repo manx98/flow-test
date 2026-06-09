@@ -17,6 +17,10 @@ WORKSPACE = os.environ.get(
     "FLOW_WORKSPACE",
     os.path.join(os.path.expanduser("~"), ".flow-test", "projects"),
 )
+SETTINGS_PATH = os.environ.get(
+    "FLOW_SETTINGS_PATH",
+    os.path.join(os.path.expanduser("~"), ".flow-test", "settings.json"),
+)
 
 FLOW_NAME = "flow.json"
 IMAGES_DIR = "images"
@@ -175,3 +179,20 @@ def list_projects() -> list[str]:
         n for n in os.listdir(WORKSPACE)
         if os.path.isdir(os.path.join(WORKSPACE, n))
     )
+
+
+def load_settings() -> dict:
+    if os.path.exists(SETTINGS_PATH):
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_settings(settings: dict) -> None:
+    os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)

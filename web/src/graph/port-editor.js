@@ -149,6 +149,7 @@ export function openPortEditor(node) {
       }
     }
     node.setDirtyCanvas && node.setDirtyCanvas(true, true)
+    node.graph?._requestHistory && node.graph._requestHistory()
     close()
   })
   foot.appendChild(cancel); foot.appendChild(save); panel.appendChild(foot)

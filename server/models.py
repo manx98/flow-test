@@ -19,6 +19,10 @@ class Meta(BaseModel):
     meta: dict[str, Any]
 
 
+class Settings(BaseModel):
+    settings: dict[str, Any]
+
+
 class RenameImage(BaseModel):
     name: str   # 新文件名
 

@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage
-from .project import Project, list_projects
+from .models import CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage, Settings
+from .project import Project, list_projects, load_settings, save_settings
 from .i18n import lang_from_accept_language, localize_catalog, tr, translate_error
 
 app = FastAPI(title="flow-test 测试工作流服务端")
@@ -61,6 +62,17 @@ async def _shutdown():
 @app.get("/api/projects")
 def api_list_projects():
     return {"projects": list_projects()}
+
+
+@app.get("/api/settings")
+def api_get_settings():
+    return {"settings": load_settings()}
+
+
+@app.put("/api/settings")
+def api_put_settings(body: Settings):
+    save_settings(body.settings)
+    return {"ok": True}
 
 
 def _lang(request: Request) -> str:
@@ -217,6 +229,28 @@ def api_check(body: CheckReq, request: Request):
     # compile() 是微秒级，直接同步即可，无需补全那套串行/去抖机制
     from .check import check_syntax
     return {"errors": check_syntax(body.code, lang=_lang(request))}
+
+
+# ======================= AI 辅助流程搭建 =======================
+@app.post("/api/projects/{name}/ai/draft")
+async def api_ai_flow_draft(name: str, request: Request, state: str = Form("{}"),
+                            files: list[UploadFile] = File(default=[])):
+    lang = _lang(request)
+    _require(name, lang)
+    try:
+        payload = json.loads(state or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("state must be an object")
+    except Exception:
+        raise HTTPException(400, tr(lang, "ai_builder.bad_state", "AI 搭建请求格式错误"))
+    try:
+        from .flow.ai_builder import AIBuilderError, generate_draft, read_case_documents
+        docs = await read_case_documents(files or [], lang=lang)
+        return await asyncio.to_thread(generate_draft, payload, docs, lang)
+    except AIBuilderError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, tr(lang, "ai_builder.failed", "AI 生成失败：{error}", error=e))
 
 
 # ======================= 节点目录（前端建面板用）=======================
