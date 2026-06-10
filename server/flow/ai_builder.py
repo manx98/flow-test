@@ -463,22 +463,20 @@ Supported JSON shape:
   "steps": [
     {"action":"log","message":"..."},
     {"action":"wait_seconds","seconds":1},
-    {"action":"wait_text","text":"...", "method":"ocr|ai", "timeout":10},
-    {"action":"click_text","text":"...", "method":"ocr|ai", "timeout":10, "button":"left", "double":false},
-    {"action":"click_ai","description":"visual target description", "timeout":10, "button":"left", "double":false},
+    {"action":"wait_text","text":"...", "method":"ocr", "timeout":10},
+    {"action":"click_text","text":"...", "method":"ocr", "timeout":10, "button":"left", "double":false},
     {"action":"wait_image","timeout":10, "similarity":0.7},
     {"action":"click_image","timeout":10, "similarity":0.7, "button":"left", "double":false},
     {"action":"type","text":"...", "paste":true},
     {"action":"hotkey","keys":"enter|tab|ctrl+c|ctrl+shift+t"},
-    {"action":"scroll_text","text":"...", "method":"ocr|ai", "dy":-3, "timeout":10},
-    {"action":"assert_text","text":"...", "method":"ocr|ai", "timeout":10, "message":"..."},
-    {"action":"assert_image","timeout":10, "similarity":0.7, "message":"..."},
-    {"action":"assert_ai","description":"...", "kind":"image|text", "timeout":10, "message":"..."}
+    {"action":"scroll_text","text":"...", "method":"ocr", "dy":-3, "timeout":10},
+    {"action":"assert_text","text":"...", "method":"ocr", "timeout":10, "message":"..."},
+    {"action":"assert_image","timeout":10, "similarity":0.7, "message":"..."}
   ]
 }
 Rules:
 - Keep it sequential. Do not create loops, custom Python, or tool-calling agents.
-- Prefer OCR for exact visible text; use AI for visual elements/icons or semantic descriptions.
+- Prefer OCR for exact visible text. For visual elements/icons, use selected template-image nodes through wait_image, click_image, or assert_image.
 - If a click target is a visible label, use click_text.
 - Use wait_image, click_image, or assert_image when the user has selected graph template nodes and the flow should match that exact template. The selected image and optional mask are provided in the prompt and will be connected automatically.
 - Insert short waits only when the case implies loading or transitions.
@@ -587,13 +585,9 @@ class _DraftCompiler:
     _flow_y: int = 330
     _data_y: int = 90
     attrs_ref: str | None = None
-    ai_ref: str | None = None
 
     def compile(self, dsl: dict) -> dict:
         self._ensure_device()
-        needs_ai = self._needs_runtime_ai(dsl)
-        if needs_ai:
-            self._ensure_ai()
 
         start_id = None
         start_external = _start_available(self.current_graph)
@@ -684,29 +678,6 @@ class _DraftCompiler:
         self.attrs_ref = attrs_id
         self._cursor_x += 520
 
-    def _ensure_ai(self) -> None:
-        ai = _first_node(self.current_graph, "ai/engine")
-        if ai:
-            self.ai_ref = f"external:{ai['id']}"
-            return
-        props = _sanitize_props({
-            "provider": self.ai_config.get("provider", "openai"),
-            "base_url": self.ai_config.get("base_url", ""),
-            "model": self.ai_config.get("model", "gpt-4o"),
-            "api_key": "",
-            "temperature": self.ai_config.get("temperature", 0),
-        })
-        self.ai_ref = self.node("ai/engine", props, pos=[self._cursor_x, self._data_y])
-        self._cursor_x += 260
-
-    def _needs_runtime_ai(self, dsl: dict) -> bool:
-        for step in dsl.get("steps") or []:
-            action = str(step.get("action") or "")
-            method = str(step.get("method") or "").lower()
-            if action in {"click_ai", "assert_ai"} or method == "ai":
-                return True
-        return False
-
     def _build_step(self, step: dict):
         action = str(step.get("action") or "").strip()
         if action == "log":
@@ -737,13 +708,13 @@ class _DraftCompiler:
             return find, find, "found"
         if action == "click_image":
             return self._click_image_target(step)
-        if action in {"click_text", "click_ai"}:
+        if action == "click_text":
             return self._click_target(step)
         if action == "scroll_text":
             return self._scroll_target(step)
         if action == "assert_image":
             return self._assert_image_target(step)
-        if action in {"assert_text", "assert_ai"}:
+        if action == "assert_text":
             return self._assert_target(step)
         # Unknown model action: keep it visible as a log instead of silently dropping it.
         n = self._log_step(json.dumps(step, ensure_ascii=False))
@@ -770,18 +741,7 @@ class _DraftCompiler:
         return n
 
     def _find_text_like(self, step: dict) -> str:
-        method = str(step.get("method") or "ocr").lower()
         timeout = _num(step.get("timeout"), 5)
-        if step.get("action") in {"click_ai", "assert_ai"}:
-            method = "ai"
-        if method == "ai":
-            kind = str(step.get("kind") or ("text" if step.get("text") else "image")).lower()
-            ntype = "ai/find_text" if kind == "text" else "ai/find_image"
-            desc = str(step.get("description") or step.get("text") or "")
-            n = self._exec_node(ntype, {"prompt": desc, "min_confidence": 0})
-            self.link(self.attrs_ref, "video", n, "video")
-            self.link(self.ai_ref, "ai", n, "ai")
-            return n
         text = self._text_const(str(step.get("text") or step.get("description") or ""), "查找文字")
         n = self._exec_node("vision/find_text", {"regex": bool(step.get("regex", False)), "timeout": timeout})
         self.link(self.attrs_ref, "video", n, "video")

@@ -95,14 +95,12 @@ export default {
         wait_text: '等待文字',
         wait_image: '等待图片',
         click_text: '点击文字',
-        click_ai: '点击目标',
         click_image: '点击图片',
         type: '输入',
         hotkey: '快捷键',
         scroll_text: '滚动',
         assert_text: '断言文字',
         assert_image: '断言图片',
-        assert_ai: '断言目标',
       },
     },
     reports: {
@@ -161,7 +159,6 @@ export default {
       maskNeedsPicture: '请先在 picture 输入连接一个模板图片',
       maskGenerateFailed: '生成遮罩失败',
       maskSaveFailed: '保存遮罩失败: {message}',
-      agentToolTypeMissing: '未找到 Agent 工具节点类型',
     },
     categories: {
       设备: '设备',
@@ -172,8 +169,6 @@ export default {
       变量: '变量',
       断言: '断言',
       脚本: '脚本',
-      Agent: 'Agent',
-      AI: 'AI',
       OCR: 'OCR',
       等待: '等待',
       测试: '测试',
@@ -195,7 +190,6 @@ export default {
     },
     menu: {
       help: '组件说明',
-      createAgentTool: '生成 Agent 工具',
     },
     dialog: {
       password: '密码',

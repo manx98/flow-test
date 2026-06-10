@@ -8,10 +8,7 @@ from __future__ import annotations
 # 端口类型常量
 EXEC = "exec"
 DEVICE = "device"
-AI = "ai"
 SCRIPT = "script"
-TOOL = "tool"
-TRACE = "trace"
 VIDEO = "video"
 PICTURE = "picture"
 MOUSE = "mouse"
@@ -30,10 +27,7 @@ ANY = "any"
 TYPE_COLORS = {
     EXEC: "#90A4AE",
     DEVICE: "#00BCD4",
-    AI: "#1DE9B6",
     SCRIPT: "#9CCC65",
-    TOOL: "#FF8A65",
-    TRACE: "#BA68C8",
     VIDEO: "#4FC3F7",
     PICTURE: "#BA68C8",
     MOUSE: "#FFB74D",
@@ -49,7 +43,7 @@ TYPE_COLORS = {
     ANY: "#BDBDBD",
 }
 
-DATA_TYPES = {DEVICE, AI, SCRIPT, TOOL, TRACE, VIDEO, PICTURE, MOUSE, KEYBOARD, MATCH, TEXT, BOOL, POINT, NUMBER, OCR, MASK, BUNDLE, ANY}
+DATA_TYPES = {DEVICE, SCRIPT, VIDEO, PICTURE, MOUSE, KEYBOARD, MATCH, TEXT, BOOL, POINT, NUMBER, OCR, MASK, BUNDLE, ANY}
 
 
 def compatible(src_type: str, dst_type: str) -> bool:

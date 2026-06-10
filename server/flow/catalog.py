@@ -26,7 +26,7 @@ def _engine_title(name: str, pkg: str) -> str:
 
 
 # 变量 value 端口可选类型（自定义连接点类型）
-_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE, T.AI, T.SCRIPT]
+_VAR_TYPES = [T.MATCH, T.POINT, T.TEXT, T.NUMBER, T.BOOL, T.PICTURE, T.MASK, T.OCR, T.DEVICE, T.SCRIPT]
 
 
 def _p(name, ptype, card="1", required=False, desc=""):
@@ -75,10 +75,6 @@ _SCRIPT_FUNCS = [
     _fn("设备.find_text(text, regex=False, ocr=None, timeout=0)",
         "找文字(OCR)：命中返回 Match，否则 None（等价「找文字」）"),
     _fn("设备.find_all(template, similarity=0.7)", "找全部：返回所有命中的 Match 列表（等价「找全部」）"),
-    _fn("设备.ai_find_image(desc, ai)", "AI 找图：按描述用大模型定位元素，命中返回 Match（等价「AI 找图」）"),
-    _fn("设备.ai_find_text(desc, ai)", "AI 找文字：按语义用大模型定位文字，命中返回 Match（等价「AI 找文字」）"),
-    _fn("设备.ai_agent(goal, ai, max_steps=15)",
-        "AI 计算机操作代理：自主多步操控设备完成 goal，返回 (ok, message, steps)（等价「AI 交互」）"),
     _fn("设备.wait_appear(template, timeout=10, mask=None)", "等出现：出现返回 Match，超时 None（等价「等出现」）"),
     _fn("设备.wait_vanish(template, timeout=10, mask=None)", "等消失：消失 True，超时 False（等价「等消失」）"),
     _fn("设备.click(target, button='left', double=False)", "在点坐标点击；target 可为 Location/Match（等价「点击」）"),
@@ -175,23 +171,6 @@ _NODES = [
      "inputs": [_p("device", T.DEVICE, "1", True, desc="要显示并交互的设备")],
      "outputs": [],
      "properties": [], "widget": "video"},
-    {"type": "io/ai_agent", "category": "交互", "title": "AI 交互",
-     "description": "AI 计算机操作代理：给一个自然语言目标，节点用大模型自主多步操控设备（看屏→决定动作→"
-                    "点击/输入/按键/滚动/拖拽→重复）直到完成或达最大步数。每步在节点上回显标注截图并记日志。"
-                    "成功走 done、失败/超步走 failed。⚠ 自主操控有风险，建议对沙箱/虚拟机设备运行，并设好 max_steps。",
-     "script": "ai_agent(goal, ai, max_steps=15)",
-     "inputs": [_exec_in(),
-                _p("device", T.DEVICE, "1", True, desc="被操控的设备（看屏 + 执行动作）"),
-                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
-                _p("goal", T.TEXT, "1", desc="任务目标描述（未接则用 prompt 属性）")],
-     "outputs": [_exec_out("done", "成功分支：模型判定任务完成"),
-                 _exec_out("failed", "失败分支：模型判定失败或超过最大步数"),
-                 _p("result", T.TEXT, "*", desc="模型最终说明/结果"),
-                 _p("ok", T.BOOL, desc="是否成功"),
-                 _p("steps", T.NUMBER, desc="实际执行步数")],
-     "properties": [_pr("prompt", "multiline", "", "任务目标（goal 未接时用；支持多行）"),
-                    _pr("max_steps", "int", 15, "最大步数上限（达上限仍未完成则失败）")]},
-
     # ===== 采集 =====
     {"type": "vision/preview", "category": "视觉", "title": "图片预览",
      "description": "显示连入的图片，支持滚轮缩放 / 右键拖拽平移；可串在图片连线中间查看，原样透传。",
@@ -244,36 +223,6 @@ _NODES = [
                  _p("count", T.NUMBER, desc="命中数量")],
      "properties": [_pr("similarity", "number", 0.7, "相似度阈值（0~1）")]},
 
-    # ===== AI 视觉查找（用大模型按描述定位，返回坐标框）=====
-    {"type": "ai/find_image", "category": "视觉", "title": "AI 找图",
-     "description": "用 AI 视觉大模型按自然语言描述在画面里定位元素/图标，命中走 found 并输出 match(坐标框)，否则 notFound。"
-                    "每次执行调用一次 AI(按量计费)；坐标由模型给出，精度取决于模型。",
-     "script": "ai_find_image(desc, ai)",
-     "inputs": [_exec_in(),
-                _p("video", T.VIDEO, "1", True, desc="查找源画面（来自「设备属性」video）"),
-                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
-                _p("desc", T.TEXT, "1", desc="要定位的元素描述（未接则用 prompt 属性）")],
-     "outputs": [_exec_out("found", "命中分支：定位到目标时走这里"),
-                 _exec_out("notFound", "未命中分支：没定位到时走这里"),
-                 _p("match", T.MATCH, "*", desc="命中坐标框（含置信度）"),
-                 _p("ok", T.BOOL, desc="是否命中")],
-     "properties": [_pr("prompt", "multiline", "", "元素描述（desc 未接时用；支持多行）"),
-                    _pr("min_confidence", "number", 0, "最低置信度（低于则当未命中）")]},
-    {"type": "ai/find_text", "category": "视觉", "title": "AI 找文字",
-     "description": "用 AI 视觉大模型按语义在画面里定位文字，命中走 found 并输出 match(坐标框)，否则 notFound。"
-                    "比 OCR 更能理解模糊/语义描述；每次执行调用一次 AI(按量计费)。",
-     "script": "ai_find_text(desc, ai)",
-     "inputs": [_exec_in(),
-                _p("video", T.VIDEO, "1", True, desc="查找源画面（来自「设备属性」video）"),
-                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
-                _p("desc", T.TEXT, "1", desc="要定位的文字/语义描述（未接则用 prompt 属性）")],
-     "outputs": [_exec_out("found", "命中分支：定位到文字时走这里"),
-                 _exec_out("notFound", "未命中分支：没定位到时走这里"),
-                 _p("match", T.MATCH, "*", desc="命中坐标框（含置信度）"),
-                 _p("ok", T.BOOL, desc="是否命中")],
-     "properties": [_pr("prompt", "multiline", "", "文字/语义描述（desc 未接时用；支持多行）"),
-                    _pr("min_confidence", "number", 0, "最低置信度（低于则当未命中）")]},
-
     # ===== OCR 引擎 =====
     {"type": "ocr/tesseract", "category": "OCR", "title": _engine_title("Tesseract 引擎", "pytesseract"),
      "description": "提供 Tesseract OCR 引擎实例，连到「找文字」的 ocr 输入。需 pytesseract + 系统 tesseract。引擎按配置全局缓存复用。",
@@ -291,44 +240,6 @@ _NODES = [
                     _pr("use_angle_cls", "bool", True, "是否启用方向分类（识别旋转文字）"),
                     _pr("det", "bool", True, "是否启用文字检测（关闭则只识别整图）"),
                     _pr("min_confidence", "number", 0, "最低置信度阈值")]},
-
-    # ===== AI 引擎（OpenAI / Ollama，视觉大模型）=====
-    {"type": "ai/engine", "category": "AI", "title": "AI 引擎",
-     "description": "提供 AI 视觉大模型引擎实例，连到「AI 找图 / AI 找文字」的 ai 输入。用官方 openai SDK，"
-                    "OpenAI 与 Ollama 共用（靠 base_url 区分）。引擎按配置全局缓存复用。需 pip install openai。"
-                    "注意：用 OpenAI 时画面会上传到云端；Ollama 为本地不出网。",
-     "inputs": [], "outputs": [_p("ai", T.AI, "*", desc="AI 引擎实例（连到「AI 找图/找文字」的 ai）")],
-     "properties": [_pr("provider", "enum", "openai", "服务商：openai / ollama / custom（决定默认 base_url）",
-                        options=["openai", "ollama", "custom"]),
-                    _pr("base_url", "string", "", "接口地址（留空按 provider 默认；custom 必填）"),
-                    _pr("model", "string", "gpt-4o", "模型名（OpenAI 如 gpt-4o；Ollama 如 llava、qwen2.5-vl）"),
-                    _pr("api_key", "password", "", "API Key（Ollama 可留空）"),
-                    _pr("temperature", "number", 0, "采样温度（定位建议 0）")]},
-    {"type": "agent/tool", "category": "AI", "title": "Agent 工具",
-     "description": "定义一个 agent 工具：name+描述告诉模型这工具干什么；「+ arg」加参数输出口(模型填的值由此喂给实现)、"
-                    "「+ result」加结果输入口(实现产出的值由此返回模型)，每个可单独写描述。exec out 触发实现子流程"
-                    "（通常接「Python 执行」）。输出 tool 句柄供「Agent」收集调用。",
-     "inputs": [],
-     "outputs": [_exec_out("out", "调用时触发：跑工具实现子流程（如接 Python 执行）"),
-                 _p("tool", T.TOOL, "*", desc="工具句柄（连到「Agent」节点）")],
-     "properties": []},
-    {"type": "agent/run", "category": "AI", "title": "Agent",
-     "description": "工具调用代理：给一个任务，模型循环「选工具→填参数→看结果」直到完成或达上限。"
-                    "用「+ 工具」加 tool 输入口，接「Agent 工具」节点。每步发执行事件，可接「Agent 展示」查看过程。"
-                    "成功走 done、失败/超步走 failed。",
-     "inputs": [_exec_in(),
-                _p("ai", T.AI, "1", True, desc="AI 引擎（来自「AI 引擎」节点）"),
-                _p("task", T.TEXT, "1", desc="任务描述（未接则用 prompt 属性）")],
-     "outputs": [_exec_out("done", "成功分支：模型判定任务完成"),
-                 _exec_out("failed", "失败分支：模型判定失败或超过最大步数"),
-                 _p("result", T.TEXT, "*", desc="模型最终结果/说明"),
-                 _p("trace", T.TRACE, "*", desc="执行过程句柄（连到「Agent 展示」）")],
-     "properties": [_pr("prompt", "multiline", "", "任务描述（task 未接时用）"),
-                    _pr("max_steps", "int", 10, "最大步数上限")]},
-    {"type": "agent/display", "category": "AI", "title": "Agent 展示",
-     "description": "展示所连「Agent」的执行过程：在节点内滚动显示每步「思考→工具(参数)→结果」。仅前端展示，无输出。",
-     "inputs": [_p("trace", T.TRACE, "1", True, desc="来自「Agent」的 trace 输出")],
-     "outputs": [], "properties": [], "widget": "agent_trace"},
 
     # ===== 坐标转换（Match → Point）=====
     {"type": "geom/to_point", "category": "动作", "title": "坐标转换",

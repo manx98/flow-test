@@ -2,7 +2,7 @@
 // （含类型、描述、模块名/描述）。保存时差异应用，尽量保留已有连线（重命名不断线）。
 
 // 可绑定的数据类型（与后端 _VAR_TYPES 对应）
-const VAR_TYPES = ['match', 'point', 'text', 'number', 'bool', 'picture', 'mask', 'ocr', 'device', 'ai', 'script']
+const VAR_TYPES = ['match', 'point', 'text', 'number', 'bool', 'picture', 'mask', 'ocr', 'device', 'script']
 
 // 每种节点的编辑配置：module=顶部模块字段；sections=分区(方向/筛选/是否选类型/是否带描述)
 export const EDIT_CONFIG = {
@@ -13,13 +13,6 @@ export const EDIT_CONFIG = {
   'script/exec': { title: 'Python 执行', module: [], sections: [
     { label: '入参', dir: 'in', match: (p) => p.type !== 'exec' && p.name !== 'script', types: VAR_TYPES },
     { label: 'result', dir: 'out', match: (p) => p.type !== 'exec', types: VAR_TYPES }] },
-  'agent/tool': { title: 'Agent 工具',
-    module: [{ key: 'name', label: '工具名', def: 'tool' }, { key: 'description', label: '描述', def: '', multiline: true }],
-    sections: [
-      { label: 'arg（参数、输出给实现）', dir: 'out', match: (p) => p.type !== 'exec' && p.type !== 'tool', types: VAR_TYPES, descProp: 'argDescs' },
-      { label: 'result（结果、从实现返回）', dir: 'in', match: (p) => p.type !== 'exec', types: VAR_TYPES, descProp: 'resultDescs' }] },
-  'agent/run': { title: 'Agent 工具', module: [], sections: [
-    { label: '工具', dir: 'in', match: (p) => p.type === 'tool', fixed: 'tool', noName: false }] },
 }
 
 export const EDITABLE_TYPES = new Set(Object.keys(EDIT_CONFIG))

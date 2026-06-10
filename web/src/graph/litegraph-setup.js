@@ -4,7 +4,7 @@ import { showNodeHelp } from './help-dialog.js'
 import { openPortEditor, EDITABLE_TYPES } from './port-editor.js'
 import { t } from '../i18n.js'
 
-const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any', DEVICE = 'device', TOOL = 'tool'
+const EXEC = 'exec', BUNDLE = 'bundle', ANY = 'any', DEVICE = 'device'
 
 // 类型兼容（与服务端 flow/types.py 一致）
 function compatible(src, dst) {
@@ -42,35 +42,6 @@ export function registerCatalog(catalog) {
   for (const spec of catalog.nodes) {
     registerOne(spec)
   }
-}
-
-// Python 执行 → 一键生成并连接一个 Agent 工具：把 入参 镜像成 arg 输出、result 镜像成 result 输入，
-// 并连好 exec_out→in、arg→入参、result→result。在执行节点左侧新建。
-function createAgentToolForExec(node) {
-  const g = node.graph
-  if (!g) return
-  const tool = LiteGraph.createNode('agent/tool')
-  if (!tool) { alert(t('app.alerts.agentToolTypeMissing')); return }
-  g.add(tool)
-  const argInputs = (node.inputs || []).filter((i) => i.type !== EXEC && i.name !== 'script')
-  const resultOutputs = (node.outputs || []).filter((o) => o.type !== EXEC)
-  for (const inp of argInputs) tool.addOutput(inp.name, inp.type)        // 入参 → arg 输出
-  for (const outp of resultOutputs) tool.addInput(outp.name, outp.type)  // result → result 输入
-  tool.size = tool.computeSize()
-  tool.pos = [node.pos[0] - (tool.size[0] || 220) - 70, node.pos[1]]
-  // 连线：tool.out→exec.in；tool.arg→exec.入参；exec.result→tool.result
-  const eOut = tool.findOutputSlot('out'), eIn = node.findInputSlot('in')
-  if (eOut >= 0 && eIn >= 0) tool.connect(eOut, node, eIn)
-  for (const inp of argInputs) {
-    const a = tool.findOutputSlot(inp.name), b = node.findInputSlot(inp.name)
-    if (a >= 0 && b >= 0) tool.connect(a, node, b)
-  }
-  for (const outp of resultOutputs) {
-    const a = node.findOutputSlot(outp.name), b = tool.findInputSlot(outp.name)
-    if (a >= 0 && b >= 0) node.connect(a, tool, b)
-  }
-  node.setDirtyCanvas(true, true)
-  g._requestHistory && g._requestHistory()
 }
 
 function markI18nWidget(widget, key, prefix = '') {
@@ -182,11 +153,9 @@ function registerOne(spec) {
     }
     // 脚本定义节点：仅嵌多行代码编辑器（入参经 get_arg 取，无设备/参数输入口）
     if (spec.type === 'script/python') this._showCode = true
-    if (spec.type === 'agent/display') this._showAgentTrace = true
     this.size = this.computeSize()
     if (this._showVideo || this._showShot) this.size[1] = Math.max(this.size[1], 220)
     if (this._showCode) { this.size[0] = Math.max(this.size[0], 300); this.size[1] = Math.max(this.size[1], 200) }
-    if (this._showAgentTrace) { this.size[0] = Math.max(this.size[0], 320); this.size[1] = Math.max(this.size[1], 200) }
   }
   NodeClass.title = spec.title
   NodeClass.desc = spec.type
@@ -247,10 +216,6 @@ function registerOne(spec) {
     const opts = [
       { content: '📖 ' + t('graph.menu.help'), callback: () => showNodeHelp(this._spec, CATALOG && CATALOG.types) },
     ]
-    // Python 执行：一键生成并连接一个 Agent 工具（镜像入参/result 端口）
-    if (spec.type === 'script/exec') {
-      opts.push({ content: '🛠 ' + t('graph.menu.createAgentTool'), callback: () => createAgentToolForExec(this) })
-    }
     opts.push(null)
     return opts
   }
