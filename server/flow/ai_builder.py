@@ -7,6 +7,7 @@ that the frontend can preview and insert.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -63,9 +64,16 @@ def generate_draft(state: dict, docs: list[dict], lang: str = "zh") -> dict:
     _require_ai_config(ai_cfg, lang)
     graph = state.get("current_graph") or {}
     device_cfg = ((state.get("form_values") or {}).get("device_config") or {})
+    graph_nodes = ((state.get("form_values") or {}).get("graph_nodes") or {})
     previous_dsl = state.get("draft_dsl") or None
+    if not graph_nodes.get("image_node_id") and _judge_needs_graph_nodes(ai_cfg, state, docs, previous_dsl, lang):
+        return {
+            "message": tr(lang, "ai_builder.need_graph_nodes", "需要先选择画布中的模板图片节点，我拿到后继续生成流程。"),
+            "forms": [_graph_nodes_form(graph_nodes, lang)],
+            "draft": None,
+        }
     dsl = _ask_model(ai_cfg, state, docs, previous_dsl, lang)
-    draft = compile_dsl(dsl, graph, device_cfg, ai_cfg, lang=lang)
+    draft = compile_dsl(dsl, graph, device_cfg, ai_cfg, graph_nodes, lang=lang)
     return {
         "message": tr(lang, "ai_builder.draft_ready", "已生成流程草稿，你可以预览后应用到画布，或继续描述修改。"),
         "forms": [],
@@ -73,9 +81,93 @@ def generate_draft(state: dict, docs: list[dict], lang: str = "zh") -> dict:
     }
 
 
+def generate_draft_stream(state: dict, docs: list[dict], lang: str = "zh"):
+    yield _thought("precheck", tr(lang, "ai_builder.thought.precheck", "检查生成前置条件"), status="active")
+    forms = missing_forms(state, lang)
+    if forms:
+        yield _thought("precheck", tr(lang, "ai_builder.thought.precheck", "检查生成前置条件"),
+                       tr(lang, "ai_builder.thought.need_info", "缺少必要配置，暂停生成并等待用户补充。"),
+                       status="done")
+        yield {
+            "type": "message",
+            "content": tr(lang, "ai_builder.need_info", "需要先补充这些信息，我拿到后继续生成流程。"),
+        }
+        for form in forms:
+            yield {"type": "form", "form": form}
+        return
+    yield _thought("precheck", tr(lang, "ai_builder.thought.precheck", "检查生成前置条件"),
+                   tr(lang, "ai_builder.thought.precheck_ok", "设备与会话上下文已准备好。"),
+                   status="done")
+
+    ai_cfg = state.get("ai_settings") or ((state.get("form_values") or {}).get("ai_settings") or {})
+    _require_ai_config(ai_cfg, lang)
+    graph = state.get("current_graph") or {}
+    device_cfg = ((state.get("form_values") or {}).get("device_config") or {})
+    graph_nodes = ((state.get("form_values") or {}).get("graph_nodes") or {})
+    previous_dsl = state.get("draft_dsl") or None
+    yield _thought("graph_nodes", tr(lang, "ai_builder.thought.graph_nodes", "判断是否需要图像节点"), status="active")
+    if not graph_nodes.get("image_node_id") and _judge_needs_graph_nodes(ai_cfg, state, docs, previous_dsl, lang):
+        yield _thought("graph_nodes", tr(lang, "ai_builder.thought.graph_nodes", "判断是否需要图像节点"),
+                       tr(lang, "ai_builder.thought.graph_nodes_needed", "模型判断需要使用画布中的模板图片节点。"),
+                       status="done")
+        yield {
+            "type": "message",
+            "content": tr(lang, "ai_builder.need_graph_nodes", "需要先选择画布中的模板图片节点，我拿到后继续生成流程。"),
+        }
+        yield {"type": "form", "form": _graph_nodes_form(graph_nodes, lang)}
+        return
+    yield _thought("graph_nodes", tr(lang, "ai_builder.thought.graph_nodes", "判断是否需要图像节点"),
+                   tr(lang, "ai_builder.thought.graph_nodes_ready", "无需额外选择，或已取得图片/遮罩节点。"),
+                   status="done")
+    yield _thought("model", tr(lang, "ai_builder.thought.model", "生成测试流程 DSL"), status="active")
+    content = ""
+    usage = None
+    for event in _ask_model_stream(ai_cfg, state, docs, previous_dsl, lang):
+        if event["type"] == "delta":
+            content += event["delta"]
+            yield {"type": "delta", "delta": event["delta"]}
+            yield {"type": "tokens", **event["tokens"]}
+        elif event["type"] == "usage":
+            usage = event["usage"]
+            yield {"type": "usage", "usage": usage}
+    yield _thought("model", tr(lang, "ai_builder.thought.model", "生成测试流程 DSL"),
+                   tr(lang, "ai_builder.thought.model_done", "模型输出完成，开始解析与校验。"),
+                   status="done")
+    yield _thought("compile", tr(lang, "ai_builder.thought.compile", "编译为画布草稿"), status="active")
+    obj = _extract_json(content)
+    if not isinstance(obj, dict):
+        yield _thought("compile", tr(lang, "ai_builder.thought.compile", "编译为画布草稿"),
+                       tr(lang, "ai_builder.thought.compile_failed", "模型输出无法解析为流程 JSON。"),
+                       status="error")
+        raise AIBuilderError(tr(lang, "ai_builder.bad_model_json",
+                                "模型没有返回可解析的流程 JSON：{snippet}", snippet=content[:200]))
+    dsl = _normalize_dsl(obj)
+    draft = compile_dsl(dsl, graph, device_cfg, ai_cfg, graph_nodes, lang=lang)
+    yield _thought("compile", tr(lang, "ai_builder.thought.compile", "编译为画布草稿"),
+                   tr(lang, "ai_builder.thought.compile_done", "已生成可应用到画布的节点与连线。"),
+                   status="done")
+    yield {
+        "type": "message",
+        "content": tr(lang, "ai_builder.draft_ready", "已生成流程草稿，你可以预览后应用到画布，或继续描述修改。"),
+    }
+    yield {"type": "draft", "draft": draft}
+    if usage:
+        yield {"type": "usage", "usage": usage}
+
+
+def _thought(node: str, title: str, detail: str = "", status: str = "active") -> dict:
+    return {
+        "type": "thought",
+        "node": node,
+        "title": title,
+        "detail": detail,
+        "status": status,
+    }
+
+
 def compile_dsl(dsl: dict, current_graph: dict | None = None, device_config: dict | None = None,
-                ai_config: dict | None = None, lang: str = "zh") -> dict:
-    compiler = _DraftCompiler(current_graph or {}, device_config or {}, ai_config or {}, lang)
+                ai_config: dict | None = None, graph_nodes: dict | None = None, lang: str = "zh") -> dict:
+    compiler = _DraftCompiler(current_graph or {}, device_config or {}, ai_config or {}, graph_nodes or {}, lang)
     return compiler.compile(dsl or {})
 
 
@@ -150,6 +242,20 @@ def _device_form(current: dict, lang: str) -> dict:
     }
 
 
+def _graph_nodes_form(current: dict, lang: str) -> dict:
+    return {
+        "id": "graph_nodes",
+        "kind": "graph_nodes",
+        "title": tr(lang, "ai_builder.forms.graph_nodes.title", "选择图像节点"),
+        "description": tr(
+            lang,
+            "ai_builder.forms.graph_nodes.desc",
+            "请在画布中选择模板图片节点；如果流程需要忽略区域，也可以选择遮罩节点。"),
+        "submit_label": tr(lang, "ai_builder.forms.continue", "继续生成"),
+        "values": current or {},
+    }
+
+
 def _field(name: str, label: str, ftype: str, default=None, **extra) -> dict:
     return {"name": name, "label": label, "type": ftype, "default": default, **extra}
 
@@ -182,6 +288,50 @@ def _decode_text(data: bytes) -> str:
 
 def _ask_model(ai_cfg: dict, state: dict, docs: list[dict], previous_dsl: dict | None,
                lang: str) -> dict:
+    req = _model_request(ai_cfg, state, docs, previous_dsl, lang)
+    resp = req["client"].chat.completions.create(**req["params"])
+    content = (resp.choices[0].message.content or "").strip()
+    obj = _extract_json(content)
+    if not isinstance(obj, dict):
+        raise AIBuilderError(tr(lang, "ai_builder.bad_model_json",
+                                "模型没有返回可解析的流程 JSON：{snippet}", snippet=content[:200]))
+    return _normalize_dsl(obj)
+
+
+def _ask_model_stream(ai_cfg: dict, state: dict, docs: list[dict], previous_dsl: dict | None,
+                      lang: str):
+    req = _model_request(ai_cfg, state, docs, previous_dsl, lang)
+    params = {**req["params"], "stream": True, "stream_options": {"include_usage": True}}
+    try:
+        stream = req["client"].chat.completions.create(**params)
+    except TypeError:
+        params.pop("stream_options", None)
+        stream = req["client"].chat.completions.create(**params)
+    completion_estimate = 0
+    for chunk in stream:
+        usage = _usage_dict(getattr(chunk, "usage", None))
+        if usage:
+            yield {"type": "usage", "usage": usage}
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        text = getattr(delta, "content", None) or ""
+        if not text:
+            continue
+        completion_estimate += _estimate_tokens(text)
+        yield {
+            "type": "delta",
+            "delta": text,
+            "tokens": {
+                "completion_tokens": completion_estimate,
+                "estimated": True,
+            },
+        }
+
+
+def _model_request(ai_cfg: dict, state: dict, docs: list[dict], previous_dsl: dict | None,
+                   lang: str) -> dict:
     try:
         from openai import OpenAI
     except ImportError as e:
@@ -201,20 +351,105 @@ def _ask_model(ai_cfg: dict, state: dict, docs: list[dict], previous_dsl: dict |
     temperature = float(ai_cfg.get("temperature", 0) or 0)
 
     client = OpenAI(base_url=base_url, api_key=api_key or "none")
-    resp = client.chat.completions.create(
-        model=model,
-        temperature=temperature,
-        messages=[
+    messages = [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": _user_prompt(state, docs, previous_dsl)},
+        ]
+    return {
+        "client": client,
+        "params": {
+            "model": model,
+            "temperature": temperature,
+            "messages": messages,
+        },
+    }
+
+
+def _judge_needs_graph_nodes(ai_cfg: dict, state: dict, docs: list[dict], previous_dsl: dict | None,
+                             lang: str) -> bool:
+    req = _model_request(ai_cfg, state, docs, previous_dsl, lang)
+    graph = state.get("current_graph") or {}
+    payload = {
+        "instruction": state.get("message") or "",
+        "recent_chat": [
+            {"role": m.get("role", "user"), "content": m.get("content", "")}
+            for m in (state.get("history") or [])[-8:] if m.get("content")
         ],
-    )
-    content = (resp.choices[0].message.content or "").strip()
+        "documents": [{"name": d.get("name", ""), "text": (d.get("text") or "")[:6000]} for d in docs],
+        "previous_dsl": previous_dsl,
+        "available_graph_nodes": _available_graph_nodes(graph),
+    }
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You decide whether an AI-assisted UI test flow MUST ask the user to select an existing "
+                "template image node from the LiteGraph canvas before planning. Return ONLY JSON with this "
+                "shape: {\"needs_graph_nodes\": true|false, \"reason\": \"short\"}.\n"
+                "Return true when the case needs template-image matching from an existing graph image node, "
+                "for example finding/clicking/asserting a specific icon, picture, screenshot crop, or masked "
+                "template that cannot be represented reliably by OCR text or an AI visual description alone. "
+                "Return false for pure text/OCR checks, keyboard/input flows, device setup, or semantic AI "
+                "vision descriptions that do not require a user-provided template image. Mask selection is "
+                "optional and should not by itself force true unless a template image is needed."
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+    params = {**req["params"], "messages": messages, "stream": False}
+    try:
+        resp = req["client"].chat.completions.create(**params)
+        content = (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return False
     obj = _extract_json(content)
-    if not isinstance(obj, dict):
-        raise AIBuilderError(tr(lang, "ai_builder.bad_model_json",
-                                "模型没有返回可解析的流程 JSON：{snippet}", snippet=content[:200]))
-    return _normalize_dsl(obj)
+    return bool(isinstance(obj, dict) and obj.get("needs_graph_nodes") is True)
+
+
+def _available_graph_nodes(graph: dict) -> dict:
+    images = []
+    masks = []
+    for node in graph.get("nodes") or []:
+        props = node.get("properties") or {}
+        item = {
+            "id": node.get("id"),
+            "type": node.get("type"),
+            "title": node.get("title") or "",
+        }
+        if node.get("type") == "const/image":
+            item["name"] = props.get("name") or ""
+            images.append(item)
+        elif node.get("type") == "mask/create":
+            item["mask"] = props.get("mask") or ""
+            masks.append(item)
+    return {"image_nodes": images, "mask_nodes": masks}
+
+
+def _usage_dict(usage) -> dict | None:
+    if not usage:
+        return None
+    if isinstance(usage, dict):
+        data = usage
+    elif hasattr(usage, "model_dump"):
+        data = usage.model_dump()
+    else:
+        data = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        }
+    out = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = data.get(key)
+        if isinstance(value, int):
+            out[key] = value
+    return out or None
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, math.ceil(len(text) / 4))
 
 
 _SYSTEM_PROMPT = """You are an expert QA automation flow planner for a LiteGraph-based UI testing tool.
@@ -231,10 +466,13 @@ Supported JSON shape:
     {"action":"wait_text","text":"...", "method":"ocr|ai", "timeout":10},
     {"action":"click_text","text":"...", "method":"ocr|ai", "timeout":10, "button":"left", "double":false},
     {"action":"click_ai","description":"visual target description", "timeout":10, "button":"left", "double":false},
+    {"action":"wait_image","timeout":10, "similarity":0.7},
+    {"action":"click_image","timeout":10, "similarity":0.7, "button":"left", "double":false},
     {"action":"type","text":"...", "paste":true},
     {"action":"hotkey","keys":"enter|tab|ctrl+c|ctrl+shift+t"},
     {"action":"scroll_text","text":"...", "method":"ocr|ai", "dy":-3, "timeout":10},
     {"action":"assert_text","text":"...", "method":"ocr|ai", "timeout":10, "message":"..."},
+    {"action":"assert_image","timeout":10, "similarity":0.7, "message":"..."},
     {"action":"assert_ai","description":"...", "kind":"image|text", "timeout":10, "message":"..."}
   ]
 }
@@ -242,6 +480,7 @@ Rules:
 - Keep it sequential. Do not create loops, custom Python, or tool-calling agents.
 - Prefer OCR for exact visible text; use AI for visual elements/icons or semantic descriptions.
 - If a click target is a visible label, use click_text.
+- Use wait_image, click_image, or assert_image when the user has selected graph template nodes and the flow should match that exact template. The selected image and optional mask are provided in the prompt and will be connected automatically.
 - Insert short waits only when the case implies loading or transitions.
 - Assertions should validate the expected final or important intermediate UI state.
 - Use concise Chinese text when the user's case is Chinese; otherwise use the user's language.
@@ -259,10 +498,14 @@ def _user_prompt(state: dict, docs: list[dict], previous_dsl: dict | None) -> st
         f"### Document: {d['name']}\n{d['text']}" for d in docs
     ) or "(none)"
     prev = json.dumps(previous_dsl, ensure_ascii=False, indent=2) if previous_dsl else "(none)"
+    values = state.get("form_values") or {}
+    selected_graph_nodes = values.get("graph_nodes") or {}
+    selected = json.dumps(selected_graph_nodes, ensure_ascii=False, indent=2) if selected_graph_nodes else "(none)"
     return (
         f"Current user instruction:\n{message or '(continue with supplied context)'}\n\n"
         f"Recent chat:\n{hist or '(none)'}\n\n"
         f"Uploaded test case documents:\n{doc_text}\n\n"
+        f"Selected graph image/mask nodes:\n{selected}\n\n"
         f"Previous draft DSL to modify, if any:\n{prev}\n\n"
         "Return the revised complete DSL JSON now."
     )
@@ -335,6 +578,7 @@ class _DraftCompiler:
     current_graph: dict
     device_config: dict
     ai_config: dict
+    graph_nodes: dict
     lang: str = "zh"
     nodes: list[dict] = field(default_factory=list)
     links: list[dict] = field(default_factory=list)
@@ -486,10 +730,19 @@ class _DraftCompiler:
             fail = self._raise_node(f"等待目标超时：{step.get('text') or step.get('description') or ''}")
             self.link(find, "notFound", fail, "in")
             return find, find, "found"
+        if action == "wait_image":
+            find = self._find_image_like(step)
+            fail = self._raise_node("等待模板图片超时")
+            self.link(find, "notFound", fail, "in")
+            return find, find, "found"
+        if action == "click_image":
+            return self._click_image_target(step)
         if action in {"click_text", "click_ai"}:
             return self._click_target(step)
         if action == "scroll_text":
             return self._scroll_target(step)
+        if action == "assert_image":
+            return self._assert_image_target(step)
         if action in {"assert_text", "assert_ai"}:
             return self._assert_target(step)
         # Unknown model action: keep it visible as a log instead of silently dropping it.
@@ -535,6 +788,21 @@ class _DraftCompiler:
         self.link(text, "text", n, "text")
         return n
 
+    def _find_image_like(self, step: dict) -> str:
+        image_ref = self._selected_image_ref()
+        if not image_ref:
+            return self._log_step("缺少已选择的模板图片节点")
+        n = self._exec_node("vision/find_image", {
+            "similarity": _num(step.get("similarity"), 0.7),
+            "timeout": _num(step.get("timeout"), 5),
+        })
+        self.link(self.attrs_ref, "video", n, "video")
+        self.link(image_ref, "picture", n, "template")
+        mask_ref = self._selected_mask_ref()
+        if mask_ref:
+            self.link(mask_ref, "mask", n, "mask", optional=True)
+        return n
+
     def _click_target(self, step: dict):
         find = self._find_text_like(step)
         point = self.node("geom/to_point", {
@@ -547,6 +815,25 @@ class _DraftCompiler:
             "double": bool(step.get("double", False)),
         })
         fail = self._raise_node(f"找不到点击目标：{step.get('text') or step.get('description') or ''}")
+        self.link(find, "match", point, "match")
+        self.link(point, "point", click, "target")
+        self.link(self.attrs_ref, "mouse", click, "mouse")
+        self.link(find, "found", click, "in")
+        self.link(find, "notFound", fail, "in")
+        return find, click, "out"
+
+    def _click_image_target(self, step: dict):
+        find = self._find_image_like(step)
+        point = self.node("geom/to_point", {
+            "anchor": step.get("anchor") or "center",
+            "dx": int(_num(step.get("dx"), 0)),
+            "dy": int(_num(step.get("dy"), 0)),
+        }, pos=[self._cursor_x - 120, self._data_y + 150])
+        click = self._exec_node("action/click", {
+            "button": step.get("button") or "left",
+            "double": bool(step.get("double", False)),
+        })
+        fail = self._raise_node("找不到模板图片目标")
         self.link(find, "match", point, "match")
         self.link(point, "point", click, "target")
         self.link(self.attrs_ref, "mouse", click, "mouse")
@@ -580,9 +867,42 @@ class _DraftCompiler:
         self.link(find, "notFound", fail_assert, "in")
         return find, ok_assert, "pass"
 
+    def _assert_image_target(self, step: dict):
+        find = self._find_image_like(step)
+        msg = str(step.get("message") or "应出现模板图片")
+        true_const = self._bool_const(True, "断言通过")
+        false_const = self._bool_const(False, "断言失败")
+        ok_assert = self._exec_node("assert/check", {"message": msg})
+        fail_assert = self._exec_node("assert/check", {"message": msg})
+        self.link(true_const, "bool", ok_assert, "cond")
+        self.link(false_const, "bool", fail_assert, "cond")
+        self.link(find, "found", ok_assert, "in")
+        self.link(find, "notFound", fail_assert, "in")
+        return find, ok_assert, "pass"
+
     def _raise_node(self, message: str) -> str:
         return self.node("flow/raise", {"message": message or "目标未找到"},
                          pos=[self._cursor_x - 260, self._flow_y + 180])
+
+    def _selected_image_ref(self) -> str | None:
+        return _selected_node_ref(self.current_graph, self.graph_nodes, "image_node_id", "const/image")
+
+    def _selected_mask_ref(self) -> str | None:
+        return _selected_node_ref(self.current_graph, self.graph_nodes, "mask_node_id", "mask/create")
+
+
+def _selected_node_ref(graph: dict, values: dict, key: str, expected_type: str) -> str | None:
+    raw = values.get(key)
+    if raw in (None, ""):
+        return None
+    try:
+        node_id = int(raw)
+    except (TypeError, ValueError):
+        return None
+    for node in graph.get("nodes") or []:
+        if int(node.get("id", -1)) == node_id and node.get("type") == expected_type:
+            return f"external:{node_id}"
+    return None
 
 
 def _sanitize_props(props: dict) -> dict:

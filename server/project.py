@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
+import uuid
 from dataclasses import dataclass
 
 import visauto
@@ -26,6 +28,7 @@ FLOW_NAME = "flow.json"
 IMAGES_DIR = "images"
 META_NAME = "project.json"
 RESULTS_DIR = "results"
+AI_SESSIONS_DIR = "ai_sessions"
 
 
 def _safe_name(name: str) -> str:
@@ -171,6 +174,88 @@ class Project:
         """把本工程 images/ 加入 visauto 图片搜索路径。"""
         os.makedirs(self.images_dir, exist_ok=True)
         visauto.ImagePath.add(self.images_dir)
+
+    # ---- AI 辅助搭建会话 ----
+    @property
+    def ai_sessions_dir(self) -> str:
+        return os.path.join(self.path, AI_SESSIONS_DIR)
+
+    def ai_session_path(self, session_id: str) -> str:
+        return os.path.join(self.ai_sessions_dir, _safe_name(session_id) + ".json")
+
+    def list_ai_sessions(self) -> list[dict]:
+        if not os.path.isdir(self.ai_sessions_dir):
+            return []
+        sessions = []
+        for name in os.listdir(self.ai_sessions_dir):
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(self.ai_sessions_dir, name), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            sessions.append({
+                "id": data.get("id") or name[:-5],
+                "title": data.get("title") or "",
+                "created_at": data.get("created_at") or 0,
+                "updated_at": data.get("updated_at") or 0,
+            })
+        return sorted(sessions, key=lambda x: x.get("updated_at") or 0, reverse=True)
+
+    def create_ai_session(self, title: str = "") -> dict:
+        now = time.time()
+        sid = uuid.uuid4().hex[:12]
+        session = {
+            "id": sid,
+            "title": title or "AI 会话",
+            "created_at": now,
+            "updated_at": now,
+            "messages": [],
+            "draft": None,
+            "form_values": {},
+        }
+        self.save_ai_session(sid, session)
+        return session
+
+    def load_ai_session(self, session_id: str) -> dict:
+        path = self.ai_session_path(session_id)
+        if not os.path.exists(path):
+            raise FileNotFoundError("AI 会话不存在")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+
+    def save_ai_session(self, session_id: str, session: dict) -> dict:
+        os.makedirs(self.ai_sessions_dir, exist_ok=True)
+        now = time.time()
+        session = dict(session or {})
+        session["id"] = _safe_name(session_id)
+        session["updated_at"] = now
+        session.setdefault("created_at", now)
+        session.setdefault("title", "AI 会话")
+        session.setdefault("messages", [])
+        session.setdefault("draft", None)
+        session.setdefault("form_values", {})
+        with open(self.ai_session_path(session_id), "w", encoding="utf-8") as f:
+            json.dump(session, f, ensure_ascii=False, indent=2)
+        return session
+
+    def delete_ai_session(self, session_id: str) -> None:
+        path = self.ai_session_path(session_id)
+        if not os.path.exists(path):
+            raise FileNotFoundError("AI 会话不存在")
+        os.remove(path)
+
+    def clear_ai_sessions(self) -> int:
+        if not os.path.isdir(self.ai_sessions_dir):
+            return 0
+        n = 0
+        for name in os.listdir(self.ai_sessions_dir):
+            if name.endswith(".json"):
+                os.remove(os.path.join(self.ai_sessions_dir, name))
+                n += 1
+        return n
 
 
 def list_projects() -> list[str]:

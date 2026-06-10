@@ -23,6 +23,10 @@ class Settings(BaseModel):
     settings: dict[str, Any]
 
 
+class AISessionBody(BaseModel):
+    session: dict[str, Any] = {}
+
+
 class RenameImage(BaseModel):
     name: str   # 新文件名
 

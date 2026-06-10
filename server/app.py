@@ -7,10 +7,10 @@ import os
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage, Settings
+from .models import AISessionBody, CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage, Settings
 from .project import Project, list_projects, load_settings, save_settings
 from .i18n import lang_from_accept_language, localize_catalog, tr, translate_error
 
@@ -232,6 +232,52 @@ def api_check(body: CheckReq, request: Request):
 
 
 # ======================= AI 辅助流程搭建 =======================
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.get("/api/projects/{name}/ai/sessions")
+def api_list_ai_sessions(name: str, request: Request):
+    return {"sessions": _require(name, _lang(request)).list_ai_sessions()}
+
+
+@app.post("/api/projects/{name}/ai/sessions")
+def api_create_ai_session(name: str, request: Request, body: AISessionBody | None = None):
+    lang = _lang(request)
+    session = (body.session if body else {}) or {}
+    return {"session": _require(name, lang).create_ai_session(session.get("title") or "")}
+
+
+@app.get("/api/projects/{name}/ai/sessions/{session_id}")
+def api_get_ai_session(name: str, session_id: str, request: Request):
+    p = _require(name, _lang(request))
+    try:
+        return {"session": p.load_ai_session(session_id)}
+    except FileNotFoundError as e:
+        raise HTTPException(404, translate_error(_lang(request), e))
+
+
+@app.put("/api/projects/{name}/ai/sessions/{session_id}")
+def api_put_ai_session(name: str, session_id: str, body: AISessionBody, request: Request):
+    p = _require(name, _lang(request))
+    return {"session": p.save_ai_session(session_id, body.session)}
+
+
+@app.delete("/api/projects/{name}/ai/sessions/{session_id}")
+def api_delete_ai_session(name: str, session_id: str, request: Request):
+    p = _require(name, _lang(request))
+    try:
+        p.delete_ai_session(session_id)
+    except FileNotFoundError as e:
+        raise HTTPException(404, translate_error(_lang(request), e))
+    return {"ok": True}
+
+
+@app.delete("/api/projects/{name}/ai/sessions")
+def api_clear_ai_sessions(name: str, request: Request):
+    return {"deleted": _require(name, _lang(request)).clear_ai_sessions()}
+
+
 @app.post("/api/projects/{name}/ai/draft")
 async def api_ai_flow_draft(name: str, request: Request, state: str = Form("{}"),
                             files: list[UploadFile] = File(default=[])):
@@ -246,11 +292,117 @@ async def api_ai_flow_draft(name: str, request: Request, state: str = Form("{}")
     try:
         from .flow.ai_builder import AIBuilderError, generate_draft, read_case_documents
         docs = await read_case_documents(files or [], lang=lang)
+        docs = _merge_ai_docs(payload.get("documents") or [], docs)
         return await asyncio.to_thread(generate_draft, payload, docs, lang)
     except AIBuilderError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(502, tr(lang, "ai_builder.failed", "AI 生成失败：{error}", error=e))
+
+
+@app.post("/api/projects/{name}/ai/sessions/{session_id}/draft/stream")
+async def api_ai_flow_draft_stream(name: str, session_id: str, request: Request,
+                                   state: str = Form("{}"),
+                                   files: list[UploadFile] = File(default=[])):
+    lang = _lang(request)
+    _require(name, lang)
+    try:
+        payload = json.loads(state or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("state must be an object")
+    except Exception:
+        raise HTTPException(400, tr(lang, "ai_builder.bad_state", "AI 搭建请求格式错误"))
+
+    async def stream():
+        try:
+            from .flow.ai_builder import AIBuilderError, generate_draft_stream, read_case_documents
+            yield _sse("thought", {
+                "node": "docs",
+                "title": tr(lang, "ai_builder.stream.reading_docs", "正在读取测试用例文档..."),
+                "detail": "",
+                "status": "active",
+            })
+            uploaded_docs = await read_case_documents(files or [], lang=lang)
+            docs = _merge_ai_docs(payload.get("documents") or [], uploaded_docs)
+            yield _sse("thought", {
+                "node": "docs",
+                "title": tr(lang, "ai_builder.stream.reading_docs", "正在读取测试用例文档..."),
+                "detail": tr(lang, "ai_builder.thought.docs_done", "测试用例文档已读取并合并到会话上下文。"),
+                "status": "done",
+            })
+            yield _sse("docs", {"docs": uploaded_docs})
+            yield _sse("thought", {
+                "node": "context",
+                "title": tr(lang, "ai_builder.stream.analyzing", "正在分析当前画布与会话上下文..."),
+                "detail": "",
+                "status": "active",
+            })
+            await asyncio.sleep(0)
+            yield _sse("thought", {
+                "node": "context",
+                "title": tr(lang, "ai_builder.stream.analyzing", "正在分析当前画布与会话上下文..."),
+                "detail": tr(lang, "ai_builder.thought.context_done", "已整理当前画布、历史会话、草稿与表单数据。"),
+                "status": "done",
+            })
+            draft_emitted = False
+            for event in generate_draft_stream(payload, docs, lang):
+                etype = event.get("type")
+                if etype == "message":
+                    yield _sse("message", {"content": event.get("content", "")})
+                elif etype == "thought":
+                    yield _sse("thought", {
+                        "node": event.get("node", ""),
+                        "title": event.get("title", ""),
+                        "detail": event.get("detail", ""),
+                        "status": event.get("status", "active"),
+                    })
+                elif etype == "form":
+                    yield _sse("form", {"form": event.get("form")})
+                elif etype == "delta":
+                    yield _sse("delta", {"text": event.get("delta", "")})
+                elif etype == "tokens":
+                    yield _sse("tokens", {
+                        "completion_tokens": event.get("completion_tokens", 0),
+                        "estimated": event.get("estimated", True),
+                    })
+                elif etype == "usage":
+                    yield _sse("usage", {"usage": event.get("usage") or {}})
+                elif etype == "draft":
+                    draft_emitted = True
+                    yield _sse("draft", {"draft": event.get("draft")})
+            if draft_emitted:
+                yield _sse("thought", {
+                    "node": "ready",
+                    "title": tr(lang, "ai_builder.stream.draft_ready", "流程草稿已生成。"),
+                    "detail": "",
+                    "status": "done",
+                })
+            yield _sse("done", {"ok": True})
+        except AIBuilderError as e:
+            yield _sse("error", {"message": str(e)})
+        except Exception as e:
+            yield _sse("error", {"message": tr(lang, "ai_builder.failed", "AI 生成失败：{error}", error=e)})
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
+
+def _merge_ai_docs(saved_docs: list, uploaded_docs: list) -> list[dict]:
+    merged = []
+    seen = set()
+    for doc in [*(saved_docs or []), *(uploaded_docs or [])]:
+        if not isinstance(doc, dict):
+            continue
+        name = str(doc.get("name") or "case.txt")
+        text = str(doc.get("text") or "")
+        key = (name, text[:80])
+        if not text.strip() or key in seen:
+            continue
+        seen.add(key)
+        merged.append({"name": name, "text": text})
+    return merged
 
 
 # ======================= 节点目录（前端建面板用）=======================

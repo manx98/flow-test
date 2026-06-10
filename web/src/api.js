@@ -24,6 +24,18 @@ export const api = {
     for (const f of files || []) fd.append('files', f, f.name)
     return req(`/api/projects/${name}/ai/draft`, { method: 'POST', headers: langHeaders(), body: fd })
   },
+  aiDraftStream: async (name, sessionId, state, files = []) => {
+    const fd = new FormData()
+    fd.append('state', JSON.stringify(state || {}))
+    for (const f of files || []) fd.append('files', f, f.name)
+    const r = await fetch(`/api/projects/${name}/ai/sessions/${sessionId}/draft/stream`, {
+      method: 'POST',
+      headers: langHeaders(),
+      body: fd,
+    })
+    if (!r.ok) throw new Error((await r.text()) || r.status)
+    return r
+  },
   // 工程
   loadSettings: () => req('/api/settings', { headers: langHeaders() }).then(d => d.settings),
   saveSettings: (settings) => req('/api/settings', { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ settings }) }),
@@ -34,6 +46,14 @@ export const api = {
   saveFlow: (name, graph) => req(`/api/projects/${name}/flow`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ graph }) }),
   loadMeta: (name) => req(`/api/projects/${name}/meta`, { headers: langHeaders() }).then(d => d.meta),
   saveMeta: (name, meta) => req(`/api/projects/${name}/meta`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ meta }) }),
+  listAiSessions: (name) => req(`/api/projects/${name}/ai/sessions`, { headers: langHeaders() }).then(d => d.sessions),
+  createAiSession: (name, session = {}) =>
+    req(`/api/projects/${name}/ai/sessions`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ session }) }).then(d => d.session),
+  loadAiSession: (name, id) => req(`/api/projects/${name}/ai/sessions/${id}`, { headers: langHeaders() }).then(d => d.session),
+  saveAiSession: (name, id, session) =>
+    req(`/api/projects/${name}/ai/sessions/${id}`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ session }) }).then(d => d.session),
+  deleteAiSession: (name, id) => req(`/api/projects/${name}/ai/sessions/${id}`, { method: 'DELETE', headers: langHeaders() }),
+  clearAiSessions: (name) => req(`/api/projects/${name}/ai/sessions`, { method: 'DELETE', headers: langHeaders() }),
   listImages: (name) => req(`/api/projects/${name}/images`, { headers: langHeaders() }).then(d => d.images),
   imageUrl: (name, img) => `/api/projects/${name}/images/${img}`,
   uploadImage: (name, blob, filename) => {

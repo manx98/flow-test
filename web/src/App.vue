@@ -188,12 +188,37 @@
           <button @click="showAiBuilder = false">×</button>
         </div>
         <div class="ai-builder-body">
+          <div class="ai-session-bar">
+            <select :value="currentAiSessionId" @change="selectAiSession($event.target.value)" :disabled="aiSending">
+              <option v-if="!aiSessions.length" value="">{{ t('app.aiBuilder.noSessions') }}</option>
+              <option v-for="s in aiSessions" :key="s.id" :value="s.id">{{ aiSessionTitle(s) }}</option>
+            </select>
+            <button @click="newAiSession" :disabled="aiSending">{{ t('app.aiBuilder.newSession') }}</button>
+            <button @click="deleteCurrentAiSession" :disabled="aiSending || !currentAiSessionId">{{ t('app.aiBuilder.deleteSession') }}</button>
+            <button @click="clearAiSessions" :disabled="aiSending || !aiSessions.length">{{ t('app.aiBuilder.clearSessions') }}</button>
+          </div>
           <div class="ai-chat">
             <div v-for="(m, idx) in aiMessages" :key="idx" class="ai-msg" :class="m.role">
               <div class="ai-role">{{ m.role === 'user' ? t('app.aiBuilder.user') : t('app.aiBuilder.assistant') }}</div>
-              <div v-if="m.content" class="ai-text">{{ m.content }}</div>
+              <div v-if="m.content" class="ai-text" v-html="renderMarkdown(m.content)"></div>
+              <div v-if="m.thoughts && m.thoughts.length" class="ai-thoughts" :class="{ collapsed: m.thoughtsCollapsed }">
+                <button class="ai-thoughts-head" @click="toggleAiThoughts(idx)">
+                  <span>{{ t('app.aiBuilder.thoughtTimeline') }}</span>
+                  <span>{{ m.thoughtsCollapsed ? '▸' : '▾' }}</span>
+                </button>
+                <ol v-if="!m.thoughtsCollapsed" class="ai-thought-list">
+                  <li v-for="item in m.thoughts" :key="item.node" :class="['ai-thought-item', item.status]">
+                    <span class="ai-thought-dot"></span>
+                    <div>
+                      <div class="ai-thought-title">{{ item.title }}</div>
+                      <div v-if="item.detail" class="ai-thought-detail">{{ item.detail }}</div>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+              <div v-if="m.tokens" class="ai-usage">{{ tokenUsageLabel(m.tokens) }}</div>
               <div v-if="m.files && m.files.length" class="ai-files">
-                <span v-for="f in m.files" :key="f">{{ f }}</span>
+                <span v-for="f in m.files" :key="fileLabel(f)">{{ fileLabel(f) }}</span>
               </div>
               <div v-if="m.form" class="ai-form">
                 <div class="ai-form-title">{{ m.form.title }}</div>
@@ -215,6 +240,25 @@
                     <small>{{ p.desc }}</small>
                   </label>
                 </template>
+                <template v-else-if="m.form.kind === 'graph_nodes'">
+                  <div class="ai-node-pickers">
+                    <button type="button" :class="{ active: isAiPickingNode(m.form, 'image') }"
+                            :disabled="m.form.submitted"
+                            @click="toggleAiNodePick(m.form, 'image')">
+                      {{ isAiPickingNode(m.form, 'image') ? t('app.aiBuilder.selectingImageNode') : t('app.aiBuilder.selectImageNode') }}
+                    </button>
+                    <button type="button" :class="{ active: isAiPickingNode(m.form, 'mask') }"
+                            :disabled="m.form.submitted"
+                            @click="toggleAiNodePick(m.form, 'mask')">
+                      {{ isAiPickingNode(m.form, 'mask') ? t('app.aiBuilder.selectingMaskNode') : t('app.aiBuilder.selectMaskNode') }}
+                    </button>
+                  </div>
+                  <div class="ai-selection-result">
+                    <div>{{ t('app.aiBuilder.selectedImageNode') }}: {{ graphNodeSelectionLabel(m.form, 'image') }}</div>
+                    <div>{{ t('app.aiBuilder.selectedMaskNode') }}: {{ graphNodeSelectionLabel(m.form, 'mask') }}</div>
+                    <div v-if="m.form.error" class="ai-form-error">{{ m.form.error }}</div>
+                  </div>
+                </template>
                 <template v-else>
                   <label v-for="f in m.form.fields" :key="f.name">
                     <span>{{ f.label }}</span>
@@ -225,7 +269,7 @@
                     <input v-else :type="formInputType(f.type)" v-model="m.form.values[f.name]" :disabled="m.form.submitted" />
                   </label>
                 </template>
-                <button class="primary" @click="submitAiForm(m.form)" :disabled="m.form.submitted || aiSending">
+                <button class="primary" @click="submitAiForm(m.form)" :disabled="m.form.submitted || aiSending || !canSubmitAiForm(m.form)">
                   {{ m.form.submitted ? t('app.aiBuilder.submitted') : (m.form.submit_label || t('app.aiBuilder.continue')) }}
                 </button>
               </div>
@@ -272,6 +316,8 @@ import { LGraph, LGraphCanvas, LiteGraph } from 'litegraph.js'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 import { fabric } from 'fabric'
+import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
 import { api } from './api.js'
 import { registerCatalog, setDeviceActionHandler, setCaptureHandler, setImageActionHandler, setMaskActionHandler } from './graph/litegraph-setup.js'
 import { installLiteGraphI18n } from './graph/litegraph-i18n.js'
@@ -282,6 +328,28 @@ import { CodeOverlay } from './graph/code-overlay.js'
 import { ErrorOverlay } from './graph/error-overlay.js'
 import { AgentTraceOverlay } from './graph/agent-overlay.js'
 import { DeviceConnection } from './webrtc/device.js'
+
+const md = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+})
+const defaultLinkOpen = md.renderer.rules.link_open || ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options))
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx]
+  const href = token.attrGet('href') || ''
+  if (!/^(https?:|mailto:|#|\/)/i.test(href)) token.attrSet('href', '#')
+  token.attrSet('target', '_blank')
+  token.attrSet('rel', 'noopener noreferrer')
+  return defaultLinkOpen(tokens, idx, options, env, self)
+}
+
+function renderMarkdown(text) {
+  const html = md.render(String(text || ''))
+  return DOMPurify.sanitize(html, {
+    ADD_ATTR: ['target', 'rel'],
+  })
+}
 
 const projects = ref([])
 const current = ref('')
@@ -537,12 +605,20 @@ function onGlobalKeyDown(ev) {
   if (isTextEditingTarget(ev.target)) return
   const mod = ev.ctrlKey || ev.metaKey
   if (!mod) return
-  const key = ev.key.toLowerCase()
-  if (key === 'z' && !ev.shiftKey) {
+  const key = (ev.key || '').toLowerCase()
+  const isZ = ev.code === 'KeyZ' || key === 'z'
+  const isY = ev.code === 'KeyY' || key === 'y'
+  const isUndo = isZ && !ev.shiftKey
+  const isRedo = isY || (isZ && ev.shiftKey)
+  if (isUndo) {
     ev.preventDefault()
+    ev.stopPropagation()
+    ev.stopImmediatePropagation && ev.stopImmediatePropagation()
     undoGraph()
-  } else if (key === 'y' || (key === 'z' && ev.shiftKey)) {
+  } else if (isRedo) {
     ev.preventDefault()
+    ev.stopPropagation()
+    ev.stopImmediatePropagation && ev.stopImmediatePropagation()
     redoGraph()
   }
 }
@@ -599,6 +675,8 @@ async function clearRuns() {
 
 // AI 辅助流程搭建
 const showAiBuilder = ref(false)
+const aiSessions = ref([])
+const currentAiSessionId = ref('')
 const aiMessages = ref([])
 const aiInput = ref('')
 const aiFiles = ref([])
@@ -606,14 +684,118 @@ const aiFileInput = ref(null)
 const aiSending = ref(false)
 const aiDraft = ref(null)
 const aiFormValues = ref({})
+const aiNodePick = ref(null)
 const aiDraftSteps = computed(() => aiDraft.value?.dsl?.steps || [])
 
-function openAiBuilder() {
+async function openAiBuilder() {
   if (!current.value) { alert(t('app.alerts.openProjectFirst')); return }
   showAiBuilder.value = true
-  if (!aiMessages.value.length) {
-    aiMessages.value.push({ role: 'assistant', content: t('app.aiBuilder.welcome') })
+  await loadAiSessions({ selectFirst: true })
+  if (!currentAiSessionId.value) await newAiSession()
+}
+
+function fileLabel(file) {
+  return typeof file === 'string' ? file : (file?.name || '')
+}
+
+function clearAiState() {
+  currentAiSessionId.value = ''
+  aiMessages.value = []
+  aiDraft.value = null
+  aiFormValues.value = {}
+  aiNodePick.value = null
+}
+
+function aiSessionTitle(session) {
+  return session?.title || t('app.aiBuilder.defaultSession')
+}
+
+function inferAiSessionTitle() {
+  if (aiDraft.value?.title) return aiDraft.value.title
+  const firstUser = aiMessages.value.find((m) => m.role === 'user' && m.content)
+  const text = (firstUser?.content || '').trim()
+  return text ? text.slice(0, 28) : t('app.aiBuilder.defaultSession')
+}
+
+async function loadAiSessions(options = {}) {
+  if (!current.value) return
+  aiSessions.value = await api.listAiSessions(current.value)
+  if (options.selectFirst && !currentAiSessionId.value && aiSessions.value.length) {
+    await selectAiSession(aiSessions.value[0].id)
   }
+}
+
+async function newAiSession() {
+  if (!current.value) return
+  const session = await api.createAiSession(current.value, { title: t('app.aiBuilder.defaultSession') })
+  aiSessions.value = [sessionSummary(session), ...aiSessions.value.filter((s) => s.id !== session.id)]
+  applyAiSession({
+    ...session,
+    messages: [{ role: 'assistant', content: t('app.aiBuilder.welcome') }],
+  })
+  await saveCurrentAiSession()
+}
+
+function sessionSummary(session) {
+  return {
+    id: session.id,
+    title: session.title || t('app.aiBuilder.defaultSession'),
+    created_at: session.created_at || 0,
+    updated_at: session.updated_at || 0,
+  }
+}
+
+function applyAiSession(session) {
+  currentAiSessionId.value = session.id || ''
+  aiMessages.value = Array.isArray(session.messages) ? session.messages : []
+  aiDraft.value = session.draft || null
+  aiFormValues.value = session.form_values || {}
+  aiNodePick.value = null
+  if (!aiMessages.value.length) aiMessages.value = [{ role: 'assistant', content: t('app.aiBuilder.welcome') }]
+}
+
+async function selectAiSession(id) {
+  if (!id || !current.value || aiSending.value) return
+  const session = await api.loadAiSession(current.value, id)
+  applyAiSession(session)
+}
+
+function currentAiSessionPayload() {
+  const summary = aiSessions.value.find((s) => s.id === currentAiSessionId.value) || {}
+  return {
+    id: currentAiSessionId.value,
+    title: inferAiSessionTitle(),
+    created_at: summary.created_at,
+    messages: aiMessages.value,
+    draft: aiDraft.value,
+    form_values: aiFormValues.value,
+  }
+}
+
+async function saveCurrentAiSession() {
+  if (!current.value || !currentAiSessionId.value) return
+  const session = await api.saveAiSession(current.value, currentAiSessionId.value, currentAiSessionPayload())
+  const summary = sessionSummary(session)
+  aiSessions.value = [summary, ...aiSessions.value.filter((s) => s.id !== summary.id)]
+}
+
+async function deleteCurrentAiSession() {
+  if (!current.value || !currentAiSessionId.value) return
+  if (!confirm(t('app.prompts.deleteAiSession'))) return
+  const deleted = currentAiSessionId.value
+  await api.deleteAiSession(current.value, deleted)
+  aiSessions.value = aiSessions.value.filter((s) => s.id !== deleted)
+  if (aiSessions.value.length) await selectAiSession(aiSessions.value[0].id)
+  else clearAiState()
+}
+
+async function clearAiSessions() {
+  if (!current.value || !aiSessions.value.length) return
+  if (!confirm(t('app.prompts.clearAiSessions'))) return
+  const { deleted } = await api.clearAiSessions(current.value)
+  aiSessions.value = []
+  clearAiState()
+  status.value = tr('app.status.clearedAiSessions', { count: deleted })
 }
 
 function onAiFiles(ev) {
@@ -628,16 +810,18 @@ async function sendAiMessage() {
 async function requestAiDraft(message, files = [], pushUser = false) {
   if (!current.value || aiSending.value) return
   if (pushUser && !message && !files.length) return
+  if (!currentAiSessionId.value) await newAiSession()
+  const userMsg = pushUser
+    ? { role: 'user', content: message, files: files.map((f) => ({ name: f.name })) }
+    : null
   if (pushUser) {
-    aiMessages.value.push({
-      role: 'user',
-      content: message,
-      files: files.map((f) => f.name),
-    })
+    aiMessages.value.push(userMsg)
     aiInput.value = ''
     aiFiles.value = []
   }
   aiSending.value = true
+  const assistantMsg = { role: 'assistant', content: '', thoughts: [], thoughtsCollapsed: false, tokens: { completion_tokens: 0, estimated: true } }
+  const assistantIdx = aiMessages.value.push(assistantMsg) - 1
   try {
     const state = {
       message,
@@ -645,24 +829,124 @@ async function requestAiDraft(message, files = [], pushUser = false) {
         .filter((m) => m.content)
         .map((m) => ({ role: m.role, content: m.content }))
         .slice(-20),
+      documents: aiMessages.value.flatMap((m) =>
+        (m.files || []).filter((f) => f && typeof f === 'object' && f.text).map((f) => ({ name: f.name, text: f.text }))),
       draft_dsl: aiDraft.value?.dsl || null,
       current_graph: graph.serialize(),
       ai_settings: aiBuilderSettings.value,
       form_values: aiFormValues.value,
     }
-    const res = await api.aiDraft(current.value, state, files)
-    if (res.message) aiMessages.value.push({ role: 'assistant', content: res.message })
-    for (const form of res.forms || []) {
-      aiMessages.value.push({ role: 'assistant', content: '', form: hydrateAiForm(form) })
-    }
-    if (res.draft) {
-      aiDraft.value = res.draft
-      status.value = t('app.status.aiDraftReady')
-    }
+    const res = await api.aiDraftStream(current.value, currentAiSessionId.value, state, files)
+    await readSse(res, (event, data) => {
+      if (event === 'status') appendAssistantLine(assistantIdx, data.message)
+      else if (event === 'docs' && userMsg) {
+        userMsg.files = (data.docs || []).map((d) => ({ name: d.name, text: d.text }))
+        const userIdx = aiMessages.value.indexOf(userMsg)
+        if (userIdx >= 0) aiMessages.value[userIdx] = { ...userMsg }
+      }
+      else if (event === 'message') appendAssistantLine(assistantIdx, data.content)
+      else if (event === 'thought') updateAiThought(assistantIdx, data)
+      else if (event === 'form') aiMessages.value.push({ role: 'assistant', content: '', form: hydrateAiForm(data.form) })
+      else if (event === 'delta') updateAiMessage(assistantIdx, (m) => ({ ...m, stream: (m.stream || '') + (data.text || '') }))
+      else if (event === 'tokens') updateAiMessage(assistantIdx, (m) => ({ ...m, tokens: { ...(m.tokens || {}), ...data } }))
+      else if (event === 'usage') updateAiMessage(assistantIdx, (m) => ({ ...m, tokens: { ...(data.usage || {}), estimated: false } }))
+      else if (event === 'draft') {
+        aiDraft.value = data.draft
+        status.value = t('app.status.aiDraftReady')
+      } else if (event === 'error') {
+        appendAssistantLine(assistantIdx, tr('app.aiBuilder.error', { message: data.message }))
+      }
+    })
   } catch (e) {
-    aiMessages.value.push({ role: 'assistant', content: tr('app.aiBuilder.error', { message: e.message }) })
+    appendAssistantLine(assistantIdx, tr('app.aiBuilder.error', { message: e.message }))
   } finally {
     aiSending.value = false
+    await saveCurrentAiSession()
+  }
+}
+
+function tokenUsageLabel(tokens) {
+  const prompt = tokens.prompt_tokens
+  const completion = tokens.completion_tokens || 0
+  const total = tokens.total_tokens
+  if (Number.isFinite(total)) {
+    return tr('app.aiBuilder.usageFull', { prompt, completion, total })
+  }
+  return tr('app.aiBuilder.usageCompletion', { completion }) + (tokens.estimated ? t('app.aiBuilder.usageEstimated') : '')
+}
+
+function updateAiMessage(index, updater) {
+  const currentMsg = aiMessages.value[index]
+  if (!currentMsg) return
+  aiMessages.value[index] = updater(currentMsg)
+}
+
+function appendAssistantLine(index, line) {
+  if (!line) return
+  updateAiMessage(index, (msg) => ({
+    ...msg,
+    content: msg.content ? `${msg.content}\n${line}` : line,
+  }))
+}
+
+function updateAiThought(index, item) {
+  if (!item?.node) return
+  updateAiMessage(index, (msg) => {
+    const thoughts = [...(msg.thoughts || [])]
+    const next = {
+      node: item.node,
+      title: item.title || item.node,
+      detail: item.detail || '',
+      status: item.status || 'active',
+      time: Date.now(),
+    }
+    const existing = thoughts.findIndex((t) => t.node === next.node)
+    if (existing >= 0) thoughts[existing] = { ...thoughts[existing], ...next }
+    else thoughts.push(next)
+    return { ...msg, thoughts, thoughtsCollapsed: msg.thoughtsCollapsed ?? false }
+  })
+}
+
+function toggleAiThoughts(index) {
+  updateAiMessage(index, (msg) => ({ ...msg, thoughtsCollapsed: !msg.thoughtsCollapsed }))
+}
+
+async function readSse(response, onEvent) {
+  if (!response.body) return
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const raw = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const evt = parseSseEvent(raw)
+      if (evt) onEvent(evt.event, evt.data)
+    }
+  }
+  buffer += decoder.decode()
+  if (buffer.trim()) {
+    const evt = parseSseEvent(buffer)
+    if (evt) onEvent(evt.event, evt.data)
+  }
+}
+
+function parseSseEvent(raw) {
+  let event = 'message'
+  const dataLines = []
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+  }
+  if (!dataLines.length) return null
+  try {
+    return { event, data: JSON.parse(dataLines.join('\n')) }
+  } catch (_) {
+    return null
   }
 }
 
@@ -671,6 +955,8 @@ function hydrateAiForm(form) {
   if (f.kind === 'device') {
     f.values = { type: f.type || f.devices?.[0]?.type || 'device/rdp', properties: {} }
     fillDeviceDefaults(f)
+  } else if (f.kind === 'graph_nodes') {
+    f.values = { ...(f.values || {}) }
   } else {
     f.values = {}
     for (const field of f.fields || []) f.values[field.name] = field.default ?? ''
@@ -701,8 +987,14 @@ function formInputType(type) {
 
 async function submitAiForm(form) {
   if (form.submitted) return
+  if (!canSubmitAiForm(form)) {
+    form.error = t('app.aiBuilder.imageNodeRequired')
+    refreshAiMessages()
+    return
+  }
   const values = normalizeAiFormValues(form)
   aiFormValues.value = { ...aiFormValues.value, [form.id]: values }
+  if (aiNodePick.value?.form === form) aiNodePick.value = null
   form.submitted = true
   aiMessages.value.push({ role: 'user', content: tr('app.aiBuilder.formSubmitted', { title: form.title }) })
   await requestAiDraft('', [], false)
@@ -715,9 +1007,86 @@ function normalizeAiFormValues(form) {
     for (const p of form._selectedProps || []) props[p.name] = normalizeFormValue(form.values.properties[p.name], p.type)
     return { type: form.values.type, properties: props }
   }
+  if (form.kind === 'graph_nodes') return { ...(form.values || {}) }
   const out = {}
   for (const f of form.fields || []) out[f.name] = normalizeFormValue(form.values[f.name], f.type)
   return out
+}
+
+function canSubmitAiForm(form) {
+  return form.kind !== 'graph_nodes' || !!form.values?.image_node_id
+}
+
+function toggleAiNodePick(form, kind) {
+  if (form.submitted) return
+  if (aiNodePick.value?.form === form && aiNodePick.value?.kind === kind) {
+    aiNodePick.value = null
+    form.error = ''
+    refreshAiMessages()
+    return
+  }
+  aiNodePick.value = { form, kind }
+  form.error = ''
+  refreshAiMessages()
+}
+
+function isAiPickingNode(form, kind) {
+  return aiNodePick.value?.form === form && aiNodePick.value?.kind === kind
+}
+
+function graphNodeSelectionLabel(form, kind) {
+  const values = form.values || {}
+  if (kind === 'image') return values.image_label || t('app.aiBuilder.notSelected')
+  return values.mask_label || t('app.aiBuilder.notSelected')
+}
+
+function refreshAiMessages() {
+  aiMessages.value = [...aiMessages.value]
+}
+
+function nodeTypeOf(node) {
+  return node?._spec?.type || node?.type || ''
+}
+
+function graphNodeLabel(node, kind) {
+  const props = node?.properties || {}
+  const file = kind === 'image' ? props.name : props.mask
+  const title = node?.title || nodeTypeOf(node)
+  return file ? `${title} #${node.id} (${file})` : `${title} #${node.id}`
+}
+
+function onGraphSelectionForAi(selected) {
+  const pick = aiNodePick.value
+  if (!pick?.form || pick.form.submitted) return
+  const nodes = Array.isArray(selected) ? selected : Object.values(selected || {})
+  const node = nodes.find(Boolean)
+  if (!node) return
+  const expected = pick.kind === 'image' ? 'const/image' : 'mask/create'
+  const actual = nodeTypeOf(node)
+  if (actual !== expected) {
+    pick.form.error = pick.kind === 'image'
+      ? t('app.aiBuilder.invalidImageNode')
+      : t('app.aiBuilder.invalidMaskNode')
+    refreshAiMessages()
+    return
+  }
+  pick.form.values ||= {}
+  if (pick.kind === 'image') {
+    pick.form.values.image_node_id = node.id
+    pick.form.values.image_node_type = actual
+    pick.form.values.image_name = node.properties?.name || ''
+    pick.form.values.image_title = node.title || ''
+    pick.form.values.image_label = graphNodeLabel(node, 'image')
+  } else {
+    pick.form.values.mask_node_id = node.id
+    pick.form.values.mask_node_type = actual
+    pick.form.values.mask_name = node.properties?.mask || ''
+    pick.form.values.mask_title = node.title || ''
+    pick.form.values.mask_label = graphNodeLabel(node, 'mask')
+  }
+  pick.form.error = ''
+  aiNodePick.value = null
+  refreshAiMessages()
 }
 
 function normalizeFormValue(value, type) {
@@ -822,9 +1191,14 @@ onMounted(async () => {
   graph = new LGraph()
   installGraphHistoryHooks()
   lgcanvas = new LGraphCanvas(canvasEl.value, graph)
+  const prevSelectionChange = lgcanvas.onSelectionChange
+  lgcanvas.onSelectionChange = function (selectedNodes) {
+    prevSelectionChange && prevSelectionChange.call(this, selectedNodes)
+    onGraphSelectionForAi(selectedNodes)
+  }
   resize()
   window.addEventListener('resize', resize)
-  window.addEventListener('keydown', onGlobalKeyDown)
+  window.addEventListener('keydown', onGlobalKeyDown, true)
 
   overlay = new VideoOverlay(lgcanvas, overlayEl.value)
   shots = new ShotOverlay(lgcanvas, overlayEl.value)
@@ -857,7 +1231,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', resize)
-  window.removeEventListener('keydown', onGlobalKeyDown)
+  window.removeEventListener('keydown', onGlobalKeyDown, true)
   clearTimeout(historyTimer)
 })
 
@@ -910,6 +1284,9 @@ async function openProject() {
   aiFormValues.value = {}
   aiDraft.value = null
   aiMessages.value = []
+  aiSessions.value = []
+  currentAiSessionId.value = ''
+  await loadAiSessions({ selectFirst: true })
   applyRdpTimeoutsToNodes(timeoutSettings.value, { recordHistory: false })
   refreshGraphI18n()
   reloadShots()
@@ -1565,11 +1942,61 @@ textarea, .graphdialog textarea {
 
 .ai-builder { width: 440px; max-width: min(440px, 96vw); }
 .ai-builder-body { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.ai-session-bar { flex: 0 0 auto; display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px;
+  padding: 8px; background: #202020; border-bottom: 1px solid #333; }
+.ai-session-bar select, .ai-session-bar button {
+  min-width: 0; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #444;
+  border-radius: 4px; padding: 4px 6px; font: 12px system-ui, sans-serif;
+}
+.ai-session-bar button { cursor: pointer; background: #333; }
+.ai-session-bar button:disabled { opacity: .55; cursor: default; }
 .ai-chat { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .ai-msg { border: 1px solid #333; background: #242424; border-radius: 6px; padding: 8px; }
 .ai-msg.user { background: #24313a; border-color: #38515f; }
 .ai-role { color: #9fd0ff; font-size: 11px; margin-bottom: 4px; }
-.ai-text { white-space: pre-wrap; line-height: 1.45; }
+.ai-text { line-height: 1.45; overflow-wrap: anywhere; }
+.ai-text :first-child { margin-top: 0; }
+.ai-text :last-child { margin-bottom: 0; }
+.ai-text p { margin: 0 0 8px; }
+.ai-text h1, .ai-text h2, .ai-text h3 { margin: 10px 0 6px; line-height: 1.25; color: #f4f7fb; }
+.ai-text h1 { font-size: 18px; }
+.ai-text h2 { font-size: 16px; }
+.ai-text h3 { font-size: 14px; }
+.ai-text ul, .ai-text ol { margin: 6px 0 8px; padding-left: 20px; }
+.ai-text li { margin: 2px 0; }
+.ai-text blockquote { margin: 8px 0; padding: 5px 8px; border-left: 3px solid #557086;
+  background: #1b252b; color: #cbd5df; }
+.ai-text code { background: #111; border: 1px solid #333; border-radius: 3px; padding: 1px 4px;
+  color: #e8edf2; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ai-text pre { margin: 8px 0; padding: 8px; overflow: auto; background: #111; border: 1px solid #333;
+  border-radius: 4px; color: #e8edf2; }
+.ai-text pre code { background: transparent; border: none; padding: 0; }
+.ai-text a { color: #8cc8ff; text-decoration: underline; }
+.ai-text table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+.ai-text th, .ai-text td { border: 1px solid #3a4650; padding: 4px 6px; }
+.ai-text th { background: #1f2a30; }
+.ai-thoughts { margin-top: 6px; border: 1px solid #34424a; border-radius: 4px; background: #171d21; overflow: hidden; }
+.ai-thoughts-head { width: 100%; display: flex; justify-content: space-between; align-items: center;
+  background: #202b31; color: #d9edf7; border: none; padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.ai-thought-list { list-style: none; margin: 0; padding: 8px 8px 8px 18px; }
+.ai-thought-item { position: relative; display: grid; grid-template-columns: 14px 1fr; gap: 6px;
+  padding: 0 0 8px; color: #cbd5df; font-size: 12px; line-height: 1.35; }
+.ai-thought-item:not(:last-child)::after { content: ""; position: absolute; left: 6px; top: 14px; bottom: 0;
+  border-left: 1px solid #41525b; }
+.ai-thought-dot { width: 9px; height: 9px; margin-top: 3px; border-radius: 50%; background: #64748b; z-index: 1; }
+.ai-thought-item.active .ai-thought-dot { background: #f6ad55; animation: thoughtPulse 1s ease-in-out infinite; }
+.ai-thought-item.done .ai-thought-dot { background: #68d391; }
+.ai-thought-item.error .ai-thought-dot { background: #fc8181; }
+.ai-thought-title { font-weight: 700; }
+.ai-thought-detail { margin-top: 2px; color: #9fb4c0; }
+@keyframes thoughtPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(246, 173, 85, .55); transform: scale(1); }
+  50% { box-shadow: 0 0 0 5px rgba(246, 173, 85, 0); transform: scale(1.18); }
+}
+.ai-stream { margin: 6px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  background: #111; border: 1px solid #333; border-radius: 4px; padding: 6px; color: #cbd5df;
+  font: 11px/1.45 monospace; }
+.ai-usage { margin-top: 6px; color: #9fb4c0; font-size: 11px; font-family: monospace; }
 .ai-files { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .ai-files span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   border: 1px solid #405260; color: #cfe8f6; border-radius: 4px; padding: 2px 6px; font-size: 12px; }
@@ -1590,6 +2017,11 @@ textarea, .graphdialog textarea {
 }
 .ai-form button:disabled, .ai-compose-actions button:disabled { cursor: default; opacity: .55; }
 .ai-form .primary, .ai-draft .primary, .ai-compose-actions .primary { background: #2b6cb0; color: #fff; }
+.ai-node-pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ai-node-pickers button.active { background: #b7791f; color: #fff; }
+.ai-selection-result { border: 1px solid #333; border-radius: 4px; background: #171717; padding: 6px 8px;
+  color: #cbd5df; font-size: 12px; line-height: 1.55; word-break: break-word; }
+.ai-form-error { color: #ff9b9b; margin-top: 4px; }
 .ai-draft { flex: 0 0 auto; max-height: 240px; overflow: auto; border-top: 1px solid #333; border-bottom: 1px solid #333;
   padding: 10px; background: #1a1d20; display: flex; flex-direction: column; gap: 6px; }
 .ai-draft-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
