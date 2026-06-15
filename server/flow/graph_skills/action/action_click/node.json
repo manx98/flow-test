@@ -1,0 +1,63 @@
+{
+  "type": "action/click",
+  "category": "动作",
+  "title": "点击",
+  "description": "在给定点坐标点击。mouse 输入来自「设备属性」，决定在哪台设备上点击。",
+  "script": "click(target, button='left', double=False)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "target",
+      "type": "point",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "点击位置（点坐标）"
+    },
+    {
+      "name": "mouse",
+      "type": "mouse",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "目标设备的鼠标能力（来自「设备属性」）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [
+    {
+      "name": "button",
+      "type": "enum",
+      "default": "left",
+      "desc": "鼠标按键",
+      "options": [
+        "left",
+        "right",
+        "middle"
+      ]
+    },
+    {
+      "name": "double",
+      "type": "bool",
+      "default": false,
+      "desc": "是否双击"
+    }
+  ],
+  "order": 15
+}

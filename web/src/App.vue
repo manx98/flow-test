@@ -53,6 +53,21 @@
       <canvas ref="canvasEl" class="graph"></canvas>
       <div ref="overlayEl" class="overlay"></div>
 
+      <div v-if="aiConfirmCall" class="ai-confirm-modal">
+        <div class="ai-confirm-dialog">
+          <div class="ai-confirm-head">{{ t('app.aiBuilder.confirmTitle') }}</div>
+          <div class="ai-confirm-body">
+            <div>{{ aiConfirmCall.tool }}</div>
+            <pre>{{ JSON.stringify(aiConfirmCall.args || {}, null, 2) }}</pre>
+          </div>
+          <div class="ai-confirm-foot">
+            <button @click="resolveAiConfirm('rejected')">{{ t('app.aiBuilder.reject') }}</button>
+            <button @click="resolveAiConfirm('approved')">{{ t('app.aiBuilder.approve') }}</button>
+            <button class="primary" @click="resolveAiConfirm('remember')">{{ t('app.aiBuilder.rememberApprove') }}</button>
+          </div>
+        </div>
+      </div>
+
       <div v-if="showCropper" class="crop-modal" @mousedown.self="closeCropper">
         <div class="crop-dialog">
           <div class="crop-head">{{ t('app.crop.title') }}</div>
@@ -121,6 +136,38 @@
             <label>
               <span>{{ t('app.settings.aiTemperature') }}</span>
               <input type="number" min="0" max="2" step="0.1" v-model.number="settingsDraft.ai_builder.temperature" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiReasoningEffort') }}</span>
+              <select v-model="settingsDraft.ai_builder.reasoning_effort">
+                <option value="">{{ t('app.settings.aiReasoningDefault') }}</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiConfirmMode') }}</span>
+              <select v-model="settingsDraft.ai_builder.confirm_mode">
+                <option value="manual">{{ t('app.settings.aiConfirmManual') }}</option>
+                <option value="auto">{{ t('app.settings.aiConfirmAuto') }}</option>
+              </select>
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiMaxToolCalls') }}</span>
+              <input type="number" min="1" max="200" step="1" v-model.number="settingsDraft.ai_builder.max_tool_calls" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiMaxRepairRounds') }}</span>
+              <input type="number" min="0" max="50" step="1" v-model.number="settingsDraft.ai_builder.max_repair_rounds" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiTimeoutSeconds') }}</span>
+              <input type="number" min="5" max="600" step="5" v-model.number="settingsDraft.ai_builder.timeout_seconds" />
+            </label>
+            <label>
+              <span>{{ t('app.settings.aiRetryAttempts') }}</span>
+              <input type="number" min="1" max="10" step="1" v-model.number="settingsDraft.ai_builder.retry_attempts" />
             </label>
           </div>
           <div class="settings-foot">
@@ -216,6 +263,21 @@
                   </li>
                 </ol>
               </div>
+              <div v-if="m.toolGroup" class="ai-tool-group" :class="{ collapsed: m.toolGroup.collapsed }">
+                <button class="ai-tool-group-head" @click="toggleAiToolGroup(idx)">
+                  <span>{{ t('app.aiBuilder.toolCalls') }} · {{ aiToolGroupLatest(m.toolGroup) }}</span>
+                  <span>{{ m.toolGroup.collapsed ? '▸' : '▾' }}</span>
+                </button>
+                <ol v-if="!m.toolGroup.collapsed" class="ai-tool-list">
+                  <li v-for="item in m.toolGroup.steps" :key="item.call_id" :class="['ai-tool-item', item.status]">
+                    <div class="ai-tool-main">
+                      <strong>{{ item.tool }}</strong>
+                      <span>{{ item.status }}</span>
+                    </div>
+                    <small v-if="item.result?.error">{{ item.result.error.message || item.result.error.code }}</small>
+                  </li>
+                </ol>
+              </div>
               <div v-if="m.tokens" class="ai-usage">{{ tokenUsageLabel(m.tokens) }}</div>
               <div v-if="m.files && m.files.length" class="ai-files">
                 <span v-for="f in m.files" :key="fileLabel(f)">{{ fileLabel(f) }}</span>
@@ -276,6 +338,17 @@
             </div>
           </div>
 
+          <div v-if="false && aiBuildSteps.length" class="ai-build-steps">
+            <div class="ai-build-title">{{ t('app.aiBuilder.buildSteps') }} · {{ aiBuildStatus }}</div>
+            <ol>
+              <li v-for="(s, i) in aiBuildSteps" :key="i" :class="s.status">
+                <strong>{{ s.tool }}</strong>
+                <span>{{ s.status }}</span>
+                <small v-if="s.result?.error">{{ s.result.error.message || s.result.error.code }}</small>
+              </li>
+            </ol>
+          </div>
+
           <div v-if="aiDraft" class="ai-draft">
             <div class="ai-draft-head">
               <strong>{{ aiDraft.title }}</strong>
@@ -298,6 +371,7 @@
             <textarea v-model="aiInput" :placeholder="t('app.aiBuilder.placeholder')" @keydown.ctrl.enter.prevent="sendAiMessage"></textarea>
             <div class="ai-compose-actions">
               <button @click="aiFileInput && aiFileInput.click()">{{ t('app.aiBuilder.upload') }}</button>
+              <button class="primary" @click="stopAiBuild" :disabled="!aiSending">{{ t('app.aiBuilder.stop') }}</button>
               <button class="primary" @click="sendAiMessage" :disabled="aiSending || (!aiInput.trim() && !aiFiles.length)">
                 {{ aiSending ? t('app.aiBuilder.generating') : t('app.aiBuilder.send') }}
               </button>
@@ -363,6 +437,12 @@ const DEFAULT_AI_BUILDER_SETTINGS = {
   model: 'gpt-4o',
   api_key: '',
   temperature: 0,
+  reasoning_effort: '',
+  confirm_mode: 'manual',
+  max_tool_calls: 40,
+  max_repair_rounds: 5,
+  timeout_seconds: 120,
+  retry_attempts: 10,
 }
 const timeoutSettings = ref({ ...DEFAULT_TIMEOUT_SETTINGS })
 const aiBuilderSettings = ref({ ...DEFAULT_AI_BUILDER_SETTINGS })
@@ -684,7 +764,15 @@ const aiSending = ref(false)
 const aiDraft = ref(null)
 const aiFormValues = ref({})
 const aiNodePick = ref(null)
-const aiDraftSteps = computed(() => aiDraft.value?.dsl?.steps || [])
+const aiBuildSteps = ref([])
+const aiBuildStatus = ref('idle')
+const aiToolPermissions = ref({ auto_approved_tools: [] })
+const aiConfirmCall = ref(null)
+let aiConfirmResolver = null
+let aiBuildWs = null
+let aiBuildHandles = new Map()
+let aiBuildHandleSeq = 0
+const aiDraftSteps = computed(() => aiDraft.value?.graph_patch?.nodes || aiDraft.value?.dsl?.nodes || aiDraft.value?.dsl?.steps || [])
 
 async function openAiBuilder() {
   if (!current.value) { alert(t('app.alerts.openProjectFirst')); return }
@@ -703,6 +791,9 @@ function clearAiState() {
   aiDraft.value = null
   aiFormValues.value = {}
   aiNodePick.value = null
+  aiBuildSteps.value = []
+  aiBuildStatus.value = 'idle'
+  aiToolPermissions.value = { auto_approved_tools: [] }
 }
 
 function aiSessionTitle(session) {
@@ -749,6 +840,9 @@ function applyAiSession(session) {
   aiMessages.value = Array.isArray(session.messages) ? session.messages : []
   aiDraft.value = session.draft || null
   aiFormValues.value = session.form_values || {}
+  aiToolPermissions.value = session.tool_permissions || { auto_approved_tools: [] }
+  aiBuildSteps.value = session.build_state?.steps || []
+  aiBuildStatus.value = session.build_state?.status || 'idle'
   aiNodePick.value = null
   if (!aiMessages.value.length) aiMessages.value = [{ role: 'assistant', content: t('app.aiBuilder.welcome') }]
 }
@@ -766,8 +860,17 @@ function currentAiSessionPayload() {
     title: inferAiSessionTitle(),
     created_at: summary.created_at,
     messages: aiMessages.value,
-    draft: aiDraft.value,
+    documents: aiMessages.value.flatMap((m) =>
+      (m.files || []).filter((f) => f && typeof f === 'object' && f.text).map((f) => ({ name: f.name, text: f.text }))),
     form_values: aiFormValues.value,
+    tool_permissions: aiToolPermissions.value,
+    build_state: {
+      status: aiBuildStatus.value || 'idle',
+      last_error: '',
+      stop_reason: '',
+      steps: aiBuildSteps.value,
+      rejected_operations: [],
+    },
   }
 }
 
@@ -803,7 +906,390 @@ function onAiFiles(ev) {
 }
 
 async function sendAiMessage() {
-  await requestAiDraft(aiInput.value.trim(), aiFiles.value, true)
+  await startAiBuild(aiInput.value.trim(), aiFiles.value, true)
+}
+
+async function startAiBuild(message, files = [], pushUser = false) {
+  if (!current.value || aiSending.value) return
+  if (pushUser && !message && !files.length) return
+  if (!currentAiSessionId.value) await newAiSession()
+  const userMsg = pushUser
+    ? { role: 'user', content: message, files: files.map((f) => ({ name: f.name })) }
+    : null
+  if (pushUser) {
+    aiMessages.value.push(userMsg)
+    aiInput.value = ''
+    aiFiles.value = []
+  }
+  aiSending.value = true
+  aiBuildStatus.value = 'running'
+  aiBuildSteps.value = []
+  aiBuildHandles = new Map()
+  aiBuildHandleSeq = 0
+  pushGraphHistoryNow()
+  const assistantIdx = aiMessages.value.push({ role: 'assistant', content: '', tokens: null }) - 1
+  let activeToolGroupIdx = -1
+  let cumulativeTokens = {}
+  const ws = new WebSocket(api.aiBuildWsUrl(current.value, currentAiSessionId.value))
+  aiBuildWs = ws
+  try {
+    await new Promise((resolve, reject) => {
+      ws.onopen = resolve
+      ws.onerror = () => reject(new Error(t('app.aiBuilder.wsError')))
+    })
+    ws.send(JSON.stringify({
+      type: 'init',
+      message,
+      history: aiMessages.value.filter((m) => m.content).map((m) => ({ role: m.role, content: m.content })).slice(-20),
+      documents: aiMessages.value.flatMap((m) =>
+        (m.files || []).filter((f) => f && typeof f === 'object' && f.text).map((f) => ({ name: f.name, text: f.text }))),
+      current_graph: graph.serialize(),
+      form_values: aiFormValues.value,
+      ai_settings: aiBuilderSettings.value,
+      limits: {
+        max_tool_calls: aiBuilderSettings.value.max_tool_calls,
+        max_repair_rounds: aiBuilderSettings.value.max_repair_rounds,
+        timeout_seconds: aiBuilderSettings.value.timeout_seconds,
+        retry_attempts: aiBuilderSettings.value.retry_attempts,
+      },
+    }))
+    let finished = false
+    const addAssistantText = (text) => {
+      if (!text) return
+      activeToolGroupIdx = -1
+      const lastIdx = aiMessages.value.length - 1
+      const last = aiMessages.value[lastIdx]
+      if (last?.role === 'assistant' && !last.toolGroup && !last.form) {
+        appendAssistantLine(lastIdx, text)
+      } else {
+        aiMessages.value.push({ role: 'assistant', content: text })
+      }
+    }
+    const addOrUpdateToolStep = (step) => {
+      upsertAiBuildStep(step)
+      const last = aiMessages.value[aiMessages.value.length - 1]
+      let idx = activeToolGroupIdx
+      if (idx < 0 || !last?.toolGroup || aiMessages.value[idx] !== last) {
+        idx = aiMessages.value.push({ role: 'assistant', toolGroup: { collapsed: true, steps: [] } }) - 1
+        activeToolGroupIdx = idx
+      }
+      updateAiMessage(idx, (msg) => {
+        const group = { ...(msg.toolGroup || { collapsed: true, steps: [] }) }
+        const steps = [...(group.steps || [])]
+        const key = step.call_id || step.id || `${step.tool}:${steps.length}`
+        const pos = steps.findIndex((s) => (s.call_id || s.id) === key)
+        const next = { ...step, call_id: key }
+        if (pos >= 0) steps[pos] = { ...steps[pos], ...next }
+        else steps.push(next)
+        return { ...msg, toolGroup: { ...group, collapsed: group.collapsed ?? true, steps } }
+      })
+    }
+    await new Promise((resolve) => {
+      ws.onerror = () => {
+        addAssistantText(t('app.aiBuilder.wsError'))
+      }
+      ws.onmessage = async (ev) => {
+        let data
+        try { data = JSON.parse(ev.data) } catch (_) { return }
+        if (data.type === 'status') {
+          aiBuildStatus.value = data.status || aiBuildStatus.value
+          addAssistantText(data.message)
+        } else if (data.type === 'message') {
+          addAssistantText(data.content)
+        } else if (data.type === 'usage') {
+          cumulativeTokens = { ...cumulativeTokens, ...(data.usage || {}) }
+          updateCurrentAiTokens({ ...cumulativeTokens, estimated: false })
+        } else if (data.type === 'tokens') {
+          cumulativeTokens = { ...cumulativeTokens, ...data }
+          updateCurrentAiTokens({ ...cumulativeTokens })
+        } else if (data.type === 'tool_step') {
+          addOrUpdateToolStep(data.step)
+        } else if (data.type === 'tool_call') {
+          addOrUpdateToolStep({ call_id: data.id, tool: data.tool, args: data.args || {}, status: 'pending', result: null })
+          const result = await executeAiToolCall(data)
+          addOrUpdateToolStep({ call_id: data.id, tool: data.tool, args: data.args || {}, status: result.status, result: result.result })
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(result))
+          else appendAssistantLine(assistantIdx, t('app.aiBuilder.wsClosedBeforeResult'))
+        } else if (data.type === 'error') {
+          aiBuildStatus.value = 'failed'
+          addAssistantText(tr('app.aiBuilder.error', { message: data.message }))
+        } else if (data.type === 'done') {
+          finished = true
+          aiBuildStatus.value = data.status || 'completed'
+          if (data.message) addAssistantText(data.message)
+          if (data.summary) addAssistantText(data.summary)
+          status.value = data.status === 'completed' ? t('app.aiBuilder.completed') : t('app.aiBuilder.stopped')
+          resolve()
+        }
+      }
+      ws.onclose = (ev) => {
+        if (!finished && aiBuildStatus.value === 'running') {
+          aiBuildStatus.value = 'stopped'
+          const reason = ev.reason || `code ${ev.code}`
+          addAssistantText(tr('app.aiBuilder.disconnected', { reason }))
+          status.value = t('app.aiBuilder.stopped')
+        }
+        resolve()
+      }
+    })
+  } catch (e) {
+    aiBuildStatus.value = 'failed'
+    appendAssistantLine(assistantIdx, tr('app.aiBuilder.error', { message: e.message }))
+  } finally {
+    if (aiBuildWs === ws) aiBuildWs = null
+    try { if (ws.readyState === WebSocket.OPEN) ws.close() } catch (_) {}
+    aiSending.value = false
+    await saveCurrentAiSession()
+  }
+}
+
+function stopAiBuild() {
+  if (aiBuildWs && aiBuildWs.readyState === WebSocket.OPEN) {
+    aiBuildWs.send(JSON.stringify({ type: 'stop', reason: 'user_stop' }))
+  }
+  aiBuildStatus.value = 'stopped'
+}
+
+async function executeAiToolCall(call) {
+  const permission = await decideAiToolPermission(call)
+  if (permission.decision === 'rejected') {
+    return aiToolResult(call, 'rejected', permission, { ok: false, error: { code: 'USER_REJECTED', message: t('app.aiBuilder.userRejected') } })
+  }
+  try {
+    const result = await runAiCanvasTool(call.tool, call.args || {})
+    const status = result.ok === false ? 'error' : 'ok'
+    return aiToolResult(call, status, permission, result)
+  } catch (e) {
+    return aiToolResult(call, 'error', permission, { ok: false, error: { code: 'TOOL_ERROR', message: e.message } })
+  }
+}
+
+async function decideAiToolPermission(call) {
+  const autoTools = aiToolPermissions.value.auto_approved_tools || []
+  if (call.risk !== 'write' || aiBuilderSettings.value.confirm_mode === 'auto' || autoTools.includes(call.tool)) {
+    return { mode: aiBuilderSettings.value.confirm_mode || 'manual', decision: 'approved', remember_tool_type: false }
+  }
+  const decision = await askAiToolConfirm(call)
+  if (decision === 'remember') {
+    aiToolPermissions.value = { auto_approved_tools: [...new Set([...autoTools, call.tool])] }
+    await saveCurrentAiSession()
+    return { mode: 'manual', decision: 'approved', remember_tool_type: true }
+  }
+  return { mode: 'manual', decision: decision === 'approved' ? 'approved' : 'rejected', remember_tool_type: false }
+}
+
+function askAiToolConfirm(call) {
+  aiConfirmCall.value = call
+  return new Promise((resolve) => { aiConfirmResolver = resolve })
+}
+
+function resolveAiConfirm(decision) {
+  const resolve = aiConfirmResolver
+  aiConfirmCall.value = null
+  aiConfirmResolver = null
+  resolve && resolve(decision)
+}
+
+function aiToolResult(call, status, permission, result) {
+  return {
+    type: 'tool_result',
+    tool_call_id: call.id,
+    tool: call.tool,
+    status,
+    permission,
+    result,
+    log: { tool: call.tool, args: call.args || {}, result, status },
+  }
+}
+
+function upsertAiBuildStep(step) {
+  const key = step.call_id || step.id || `${step.tool}:${aiBuildSteps.value.length}`
+  const idx = aiBuildSteps.value.findIndex((s) => (s.call_id || s.id) === key)
+  const next = { ...step, call_id: key }
+  if (idx >= 0) aiBuildSteps.value[idx] = { ...aiBuildSteps.value[idx], ...next }
+  else aiBuildSteps.value.push(next)
+}
+
+async function runAiCanvasTool(tool, args) {
+  if (tool === 'inspect_canvas') return inspectAiCanvas(args)
+  if (tool === 'list_node_types') return listAiNodeTypes(args)
+  if (tool === 'read_node_spec') return readAiNodeSpec(args)
+  if (tool === 'create_node') return createAiNode(args)
+  if (tool === 'set_node_property') return setAiNodeProperty(args)
+  if (tool === 'connect_nodes') return connectAiNodes(args)
+  if (tool === 'delete_node') return deleteAiNode(args)
+  if (tool === 'delete_link') return deleteAiLink(args)
+  if (tool === 'validate_canvas') return validateAiCanvas()
+  if (tool === 'finish_build') return validateAiCanvas()
+  return { ok: false, error: { code: 'UNKNOWN_TOOL', message: tool } }
+}
+
+function specSummary(spec) {
+  return {
+    type: spec.type,
+    title: spec.title,
+    category: spec.category,
+    description: spec.description || '',
+    inputs: spec.inputs || [],
+    outputs: spec.outputs || [],
+    properties: spec.properties || [],
+  }
+}
+
+function nodeSpecByType(type) {
+  return catalogNodes.value.find((n) => n.type === type)
+}
+
+function inspectAiCanvas() {
+  const nodes = (graph?._nodes || []).map((n) => ({
+    id: n.id,
+    ref: `external:${n.id}`,
+    type: nodeTypeOf(n),
+    title: n.title || '',
+    inputs: (n.inputs || []).map((p) => ({ name: p.name, type: p.type, link: p.link })),
+    outputs: (n.outputs || []).map((p) => ({ name: p.name, type: p.type, links: p.links || [] })),
+    properties: n.properties || {},
+  }))
+  return { ok: true, nodes, links: graph?.links || {}, handles: Object.fromEntries([...aiBuildHandles.entries()].map(([h, n]) => [h, n.id])) }
+}
+
+function listAiNodeTypes(args) {
+  const category = String(args?.category || '').trim()
+  const nodes = catalogNodes.value
+    .filter((n) => !category || n.category === category || n.type.startsWith(category + '/'))
+    .map((n) => ({ type: n.type, title: n.title, category: n.category, description: n.description || '' }))
+  return { ok: true, nodes }
+}
+
+async function readAiNodeSpec(args) {
+  const type = String(args?.type || '')
+  try {
+    const data = await api.nodeSpec(type)
+    return { ok: true, spec: data.spec, doc: data.doc || data.spec?.description || '' }
+  } catch (e) {
+    const spec = nodeSpecByType(type)
+    if (!spec) return { ok: false, error: { code: 'NODE_TYPE_NOT_FOUND', message: type } }
+    return { ok: true, spec: specSummary(spec), doc: spec.description || '' }
+  }
+}
+
+function resolveAiNodeRef(ref) {
+  const text = String(ref || '')
+  if (aiBuildHandles.has(text)) return aiBuildHandles.get(text)
+  if (text.startsWith('external:')) return graph.getNodeById(Number(text.slice('external:'.length)))
+  return null
+}
+
+function createAiNode(args) {
+  const type = String(args.type || '')
+  const spec = nodeSpecByType(type)
+  if (!spec) return { ok: false, error: { code: 'NODE_TYPE_NOT_FOUND', message: type } }
+  const node = LiteGraph.createNode(type)
+  if (!node) return { ok: false, error: { code: 'CREATE_NODE_FAILED', message: type } }
+  if (args.title) node.title = String(args.title).slice(0, 120)
+  const pos = Array.isArray(args.pos) ? args.pos : []
+  node.pos = [Number(pos[0] ?? 120), Number(pos[1] ?? 330)]
+  for (const [key, value] of Object.entries(args.properties || {})) {
+    if (node.setProperty) node.setProperty(key, value)
+    else node.properties[key] = value
+  }
+  graph.add(node)
+  const handle = `n${++aiBuildHandleSeq}`
+  aiBuildHandles.set(handle, node)
+  markAiGraphChanged()
+  return { ok: true, handle, canvas_id: node.id, inputs: node.inputs || [], outputs: node.outputs || [], properties: node.properties || {} }
+}
+
+function setAiNodeProperty(args) {
+  const node = resolveAiNodeRef(args.ref)
+  if (!node) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: String(args.ref || '') } }
+  const spec = node._spec || nodeSpecByType(nodeTypeOf(node))
+  const prop = (spec?.properties || []).find((p) => p.name === args.name)
+  if (!prop) return { ok: false, error: { code: 'PROPERTY_NOT_FOUND', message: String(args.name || '') } }
+  const value = normalizeFormValue(args.value, prop.type)
+  if (node.setProperty) node.setProperty(args.name, value)
+  else node.properties[args.name] = value
+  markAiGraphChanged()
+  return { ok: true }
+}
+
+function connectAiNodes(args) {
+  const src = resolveAiNodeRef(args.from)
+  const dst = resolveAiNodeRef(args.to)
+  if (!src || !dst) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: `${args.from} -> ${args.to}` } }
+  const outSlot = src.findOutputSlot(args.out)
+  const inSlot = dst.findInputSlot(args.in)
+  if (outSlot < 0 || inSlot < 0) return { ok: false, error: { code: 'PORT_NOT_FOUND', message: `${args.out} -> ${args.in}` } }
+  const before = JSON.stringify(dst.inputs?.[inSlot]?.link ?? null)
+  src.connect(outSlot, dst, inSlot)
+  const after = JSON.stringify(dst.inputs?.[inSlot]?.link ?? null)
+  if (before === after) return { ok: false, error: { code: 'CONNECT_FAILED', message: `${args.out} -> ${args.in}` } }
+  markAiGraphChanged()
+  return { ok: true }
+}
+
+function deleteAiNode(args) {
+  const node = resolveAiNodeRef(args.ref)
+  if (!node) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: String(args.ref || '') } }
+  graph.remove(node)
+  markAiGraphChanged()
+  return { ok: true }
+}
+
+function deleteAiLink(args) {
+  const src = resolveAiNodeRef(args.from)
+  const dst = resolveAiNodeRef(args.to)
+  if (!src || !dst) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: `${args.from} -> ${args.to}` } }
+  const outSlot = src.findOutputSlot(args.out)
+  const inSlot = dst.findInputSlot(args.in)
+  const input = dst.inputs?.[inSlot]
+  if (outSlot < 0 || inSlot < 0 || input?.link == null) return { ok: false, error: { code: 'LINK_NOT_FOUND', message: `${args.out} -> ${args.in}` } }
+  dst.disconnectInput(inSlot)
+  markAiGraphChanged()
+  return { ok: true }
+}
+
+function validateAiCanvas() {
+  const errors = []
+  const nodes = graph?._nodes || []
+  if (!nodes.length) errors.push({ code: 'EMPTY_GRAPH', message: 'canvas has no nodes' })
+  if (!nodes.some((n) => nodeTypeOf(n) === 'flow/start')) errors.push({ code: 'NO_START_NODE', message: 'missing flow/start' })
+  for (const n of nodes) {
+    const spec = n._spec || nodeSpecByType(nodeTypeOf(n))
+    if (!spec) errors.push({ code: 'UNKNOWN_NODE_TYPE', message: nodeTypeOf(n), node: n.id })
+    for (const input of n.inputs || []) {
+      if (input.type === 'exec') continue
+      const specInput = (spec?.inputs || []).find((p) => p.name === input.name)
+      if (specInput?.required && input.link == null && !requiredInputSatisfiedByProperty(n, specInput)) {
+        errors.push({ code: 'MISSING_REQUIRED_INPUT', message: input.name, node: n.id })
+      }
+    }
+    for (const prop of spec?.properties || []) {
+      if (prop.required && !requiredPropertySatisfied(n, prop)) {
+        errors.push({ code: 'MISSING_REQUIRED_PROPERTY', message: prop.name, node: n.id })
+      }
+    }
+  }
+  return { ok: !errors.length, errors, warnings: [] }
+}
+
+function requiredInputSatisfiedByProperty(node, input) {
+  const value = node.properties?.[input.name]
+  return value !== undefined && value !== null && String(value).trim() !== ''
+}
+
+function requiredPropertySatisfied(node, prop) {
+  const inputSlot = node.findInputSlot ? node.findInputSlot(prop.name) : -1
+  if (inputSlot >= 0 && node.inputs?.[inputSlot]?.link != null) return true
+  const value = node.properties?.[prop.name]
+  if (prop.type === 'bool') return value !== undefined && value !== null
+  return value !== undefined && value !== null && String(value).trim() !== ''
+}
+
+function markAiGraphChanged() {
+  refreshGraphI18n()
+  lgcanvas && lgcanvas.setDirty(true, true)
+  scheduleGraphHistory()
 }
 
 async function requestAiDraft(message, files = [], pushUser = false) {
@@ -830,7 +1316,8 @@ async function requestAiDraft(message, files = [], pushUser = false) {
         .slice(-20),
       documents: aiMessages.value.flatMap((m) =>
         (m.files || []).filter((f) => f && typeof f === 'object' && f.text).map((f) => ({ name: f.name, text: f.text }))),
-      draft_dsl: aiDraft.value?.dsl || null,
+      draft_patch: aiDraft.value?.graph_patch || aiDraft.value?.dsl || null,
+      draft_dsl: aiDraft.value?.graph_patch || aiDraft.value?.dsl || null,
       current_graph: graph.serialize(),
       ai_settings: aiBuilderSettings.value,
       form_values: aiFormValues.value,
@@ -888,6 +1375,17 @@ function appendAssistantLine(index, line) {
   }))
 }
 
+function updateCurrentAiTokens(tokens) {
+  const lastIdx = aiMessages.value.length - 1
+  const last = aiMessages.value[lastIdx]
+  if (last?.role === 'assistant' && !last.toolGroup && !last.form) {
+    updateAiMessage(lastIdx, (m) => ({ ...m, tokens }))
+  } else {
+    updateAiMessage(0, (m) => m)
+    aiMessages.value.push({ role: 'assistant', content: '', tokens })
+  }
+}
+
 function updateAiThought(index, item) {
   if (!item?.node) return
   updateAiMessage(index, (msg) => {
@@ -908,6 +1406,19 @@ function updateAiThought(index, item) {
 
 function toggleAiThoughts(index) {
   updateAiMessage(index, (msg) => ({ ...msg, thoughtsCollapsed: !msg.thoughtsCollapsed }))
+}
+
+function toggleAiToolGroup(index) {
+  updateAiMessage(index, (msg) => ({
+    ...msg,
+    toolGroup: { ...(msg.toolGroup || {}), collapsed: !msg.toolGroup?.collapsed },
+  }))
+}
+
+function aiToolGroupLatest(group) {
+  const latest = (group?.steps || [])[Math.max(0, (group?.steps || []).length - 1)]
+  if (!latest) return ''
+  return `${latest.tool} ${latest.status || ''}`.trim()
 }
 
 async function readSse(response, onEvent) {
@@ -1102,6 +1613,11 @@ function normalizeFormValue(value, type) {
 }
 
 function stepLabel(step) {
+  if (step.type) {
+    const spec = catalogNodes.value.find((n) => n.type === step.type)
+    const title = spec ? nodeTitle(spec) : step.type
+    return `${step.id || ''} ${title}`.trim()
+  }
   const action = step.action || ''
   const target = step.text || step.description || step.message || step.keys || ''
   return t(`app.aiBuilder.actions.${action}`, action) + (target ? `: ${target}` : '')
@@ -1346,13 +1862,30 @@ function normalizeAiBuilderSettings(raw = {}) {
     model: String(raw.model ?? DEFAULT_AI_BUILDER_SETTINGS.model),
     api_key: String(raw.api_key ?? DEFAULT_AI_BUILDER_SETTINGS.api_key),
     temperature: clampAiTemperature(raw.temperature, DEFAULT_AI_BUILDER_SETTINGS.temperature),
+    reasoning_effort: normalizeReasoningEffort(raw.reasoning_effort),
+    confirm_mode: raw.confirm_mode === 'auto' ? 'auto' : 'manual',
+    max_tool_calls: clampInt(raw.max_tool_calls, DEFAULT_AI_BUILDER_SETTINGS.max_tool_calls, 1, 200),
+    max_repair_rounds: clampInt(raw.max_repair_rounds, DEFAULT_AI_BUILDER_SETTINGS.max_repair_rounds, 0, 50),
+    timeout_seconds: clampInt(raw.timeout_seconds, DEFAULT_AI_BUILDER_SETTINGS.timeout_seconds, 5, 600),
+    retry_attempts: clampInt(raw.retry_attempts, DEFAULT_AI_BUILDER_SETTINGS.retry_attempts, 1, 10),
   }
+}
+
+function normalizeReasoningEffort(value) {
+  const text = String(value ?? '')
+  return ['', 'low', 'medium', 'high'].includes(text) ? text : ''
 }
 
 function clampAiTemperature(value, fallback) {
   const n = Number(value)
   if (!Number.isFinite(n)) return fallback
   return Math.min(2, Math.max(0, n))
+}
+
+function clampInt(value, fallback, min, max) {
+  const n = parseInt(value, 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
 }
 
 function applyRdpTimeoutsToNodes(settings, options = {}) {
@@ -1983,6 +2516,17 @@ textarea, .graphdialog textarea {
 .ai-thought-item.error .ai-thought-dot { background: #fc8181; }
 .ai-thought-title { font-weight: 700; }
 .ai-thought-detail { margin-top: 2px; color: #9fb4c0; }
+.ai-tool-group { margin-top: 6px; border: 1px solid #3a4650; border-radius: 4px; background: #151b20; overflow: hidden; }
+.ai-tool-group-head { width: 100%; display: flex; justify-content: space-between; align-items: center;
+  background: #1f2930; color: #d9edf7; border: none; padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.ai-tool-list { list-style: none; margin: 0; padding: 6px 8px; }
+.ai-tool-item { padding: 4px 0; border-bottom: 1px solid #26323a; font-size: 12px; }
+.ai-tool-item:last-child { border-bottom: 0; }
+.ai-tool-main { display: flex; justify-content: space-between; gap: 8px; }
+.ai-tool-item.pending .ai-tool-main span { color: #f6ad55; }
+.ai-tool-item.ok .ai-tool-main span { color: #68d391; }
+.ai-tool-item.error .ai-tool-main span, .ai-tool-item.rejected .ai-tool-main span { color: #fc8181; }
+.ai-tool-item small { display: block; margin-top: 2px; color: #ff9b9b; word-break: break-word; }
 @keyframes thoughtPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(246, 173, 85, .55); transform: scale(1); }
   50% { box-shadow: 0 0 0 5px rgba(246, 173, 85, 0); transform: scale(1.18); }
@@ -2023,6 +2567,24 @@ textarea, .graphdialog textarea {
 .ai-draft-summary { color: #ddd; line-height: 1.4; }
 .ai-draft ol { margin: 0; padding-left: 20px; }
 .ai-draft li { padding: 2px 0; }
+.ai-build-steps { flex: 0 0 auto; max-height: 180px; overflow: auto; border-top: 1px solid #333;
+  padding: 8px 10px; background: #171d21; }
+.ai-build-title { color: #9fd0ff; font-weight: 700; margin-bottom: 4px; }
+.ai-build-steps ol { margin: 0; padding-left: 20px; }
+.ai-build-steps li { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 2px 0; font-size: 12px; }
+.ai-build-steps li small { grid-column: 1 / -1; color: #ff9b9b; }
+.ai-build-steps li.ok span { color: #68d391; }
+.ai-build-steps li.error span, .ai-build-steps li.rejected span { color: #fc8181; }
+.ai-confirm-modal { position: absolute; inset: 0; z-index: 340; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; }
+.ai-confirm-dialog { width: min(520px, 92vw); background: #1f1f1f; color: #ddd; border-radius: 6px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.6); overflow: hidden; }
+.ai-confirm-head { padding: 8px 12px; background: #2b2b2b; }
+.ai-confirm-body { padding: 10px; }
+.ai-confirm-body pre { max-height: 260px; overflow: auto; background: #111; border: 1px solid #333; padding: 8px; }
+.ai-confirm-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; background: #262626; }
+.ai-confirm-foot button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; background: #3a3a3a; color: #ddd; }
+.ai-confirm-foot .primary { background: #2b6cb0; color: #fff; }
 .ai-compose { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #202020; }
 .ai-compose textarea { min-height: 86px; resize: vertical; line-height: 1.45; }
 .ai-compose-actions { display: flex; justify-content: flex-end; gap: 8px; }

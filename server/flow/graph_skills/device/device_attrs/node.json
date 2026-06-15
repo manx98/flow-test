@@ -1,0 +1,60 @@
+{
+  "type": "device/attrs",
+  "category": "设备",
+  "title": "设备属性",
+  "description": "把设备句柄拆成各项能力：video(画面)、mouse/keyboard(控制)、width/height(屏幕宽高)。video 连到「找图/找文字/等待」；mouse/keyboard 连到「点击/输入文本」等动作。",
+  "inputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "上游设备句柄"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "video",
+      "type": "video",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "设备实时画面：连「找图/找文字/等待」作查找源"
+    },
+    {
+      "name": "mouse",
+      "type": "mouse",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "鼠标控制：连「点击/滚动/拖拽」的 mouse 输入"
+    },
+    {
+      "name": "keyboard",
+      "type": "keyboard",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "键盘控制：连「输入文本」的 keyboard 输入"
+    },
+    {
+      "name": "width",
+      "type": "number",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "屏幕宽度（像素）"
+    },
+    {
+      "name": "height",
+      "type": "number",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "屏幕高度（像素）"
+    }
+  ],
+  "properties": [],
+  "order": 5
+}

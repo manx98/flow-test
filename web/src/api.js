@@ -14,6 +14,7 @@ async function req(url, opts) {
 export const api = {
   health: () => req('/api/health', { headers: langHeaders() }),
   catalog: () => req('/api/nodes', { headers: langHeaders() }),
+  nodeSpec: (type) => req(`/api/nodes/spec?type=${encodeURIComponent(type)}`, { headers: langHeaders() }),
   complete: (code, line, column) =>
     req('/api/complete', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ code, line, column }) }).then(d => d.completions),
   check: (code) =>
@@ -35,6 +36,10 @@ export const api = {
     })
     if (!r.ok) throw new Error((await r.text()) || r.status)
     return r
+  },
+  aiBuildWsUrl: (name, sessionId) => {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${location.host}/ws/ai-build/${encodeURIComponent(name)}/${encodeURIComponent(sessionId)}?lang=${encodeURIComponent(getLocale())}`
   },
   // 工程
   loadSettings: () => req('/api/settings', { headers: langHeaders() }).then(d => d.settings),

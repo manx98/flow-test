@@ -1,0 +1,51 @@
+{
+  "type": "assert/check",
+  "category": "测试",
+  "title": "断言",
+  "description": "条件为真走 pass，否则走 fail；结果记入测试报告（失败自动抓帧存证据）。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "cond",
+      "type": "bool",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要断言的布尔条件"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "pass",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "断言通过分支"
+    },
+    {
+      "name": "fail",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "断言失败分支"
+    }
+  ],
+  "properties": [
+    {
+      "name": "message",
+      "type": "string",
+      "default": "",
+      "desc": "断言说明（记入报告）"
+    }
+  ],
+  "order": 23
+}

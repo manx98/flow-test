@@ -1,0 +1,53 @@
+{
+  "type": "action/drag",
+  "category": "动作",
+  "title": "拖拽",
+  "description": "从起点拖到终点。mouse 输入来自「设备属性」。",
+  "script": "drag(src, dst)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "src",
+      "type": "point",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "拖拽起点"
+    },
+    {
+      "name": "dst",
+      "type": "point",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "拖拽终点"
+    },
+    {
+      "name": "mouse",
+      "type": "mouse",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "目标设备的鼠标能力（来自「设备属性」）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [],
+  "order": 19
+}

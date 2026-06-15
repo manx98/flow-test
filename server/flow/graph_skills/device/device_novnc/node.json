@@ -1,0 +1,32 @@
+{
+  "type": "device/novnc",
+  "category": "设备",
+  "title": "noVNC 设备",
+  "description": "通过 VNC/websockify 连接远程桌面作为被测设备。依赖 websocket-client。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "设备句柄：连「设备属性」取出 video/mouse/keyboard 等能力，或直接连「人机交互」「脚本」"
+    }
+  ],
+  "properties": [
+    {
+      "name": "url",
+      "type": "string",
+      "default": "ws://127.0.0.1:6080/websockify",
+      "desc": "websockify 地址（ws/wss）"
+    },
+    {
+      "name": "password",
+      "type": "password",
+      "default": "",
+      "desc": "VNC 连接密码（可空）"
+    }
+  ],
+  "order": 1
+}

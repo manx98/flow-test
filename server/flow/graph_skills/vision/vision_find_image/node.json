@@ -1,0 +1,90 @@
+{
+  "type": "vision/find_image",
+  "category": "视觉",
+  "title": "找图",
+  "description": "在设备画面上找模板图：命中走 found 并输出 match，否则走 notFound。可用 mask 忽略模板部分区域。",
+  "script": "find_image(template, similarity=0.7, mask=None, timeout=0)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "video",
+      "type": "video",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "查找源画面（来自设备 video）"
+    },
+    {
+      "name": "template",
+      "type": "picture",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要查找的模板图片"
+    },
+    {
+      "name": "mask",
+      "type": "mask",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "可选遮罩：涂抹处不参与匹配"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "found",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "命中分支：在画面中找到模板时走这里"
+    },
+    {
+      "name": "notFound",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "未命中分支：找不到模板时走这里"
+    },
+    {
+      "name": "match",
+      "type": "match",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "命中结果（位置矩形 + 相似度）"
+    },
+    {
+      "name": "ok",
+      "type": "bool",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "是否命中（true/false）"
+    }
+  ],
+  "properties": [
+    {
+      "name": "similarity",
+      "type": "number",
+      "default": 0.7,
+      "desc": "相似度阈值（0~1，越高越严格）"
+    },
+    {
+      "name": "timeout",
+      "type": "number",
+      "default": 0,
+      "desc": "等待秒数：0=只查一次，>0=在超时内反复查直到命中"
+    }
+  ],
+  "order": 9
+}

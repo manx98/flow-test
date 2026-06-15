@@ -1,0 +1,35 @@
+{
+  "type": "const/image",
+  "category": "数据",
+  "title": "模板图片",
+  "description": "提供一张模板图片。通过「📁 上传图片 / 📋 粘贴图片」选图并命名，节点上回显，文件名可点击复制 / ✎ 重命名。",
+  "script": "image(name)",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "picture",
+      "type": "picture",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "模板图片，连到找图/等待的 template"
+    }
+  ],
+  "properties": [
+    {
+      "name": "name",
+      "type": "image",
+      "default": "",
+      "desc": "图片文件名（images/ 下，由上传/粘贴写入）",
+      "required": true
+    },
+    {
+      "name": "备注",
+      "type": "string",
+      "default": "",
+      "desc": "备注：说明此常量的用途（仅展示，不参与运行）"
+    }
+  ],
+  "widget": "image",
+  "order": 31
+}

@@ -1,0 +1,36 @@
+{
+  "type": "mask/create",
+  "category": "视觉",
+  "title": "创建遮罩",
+  "description": "以上游模板图为底涂抹要忽略的区域生成遮罩（点「✏ 编辑遮罩」用画笔涂抹）。遮罩语义：白=参与匹配，涂抹处=忽略。",
+  "inputs": [
+    {
+      "name": "picture",
+      "type": "picture",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "作为底图的模板图片"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "mask",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "生成的遮罩，连到「找图」的 mask 输入"
+    }
+  ],
+  "properties": [
+    {
+      "name": "mask",
+      "type": "image",
+      "default": "",
+      "desc": "遮罩图（由「编辑遮罩」交互写入，无需手填）"
+    }
+  ],
+  "widget": "mask",
+  "order": 8
+}

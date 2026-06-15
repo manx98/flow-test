@@ -1,0 +1,19 @@
+{
+  "type": "test/result",
+  "category": "测试",
+  "title": "测试结果",
+  "description": "汇总所有断言，产出通过/失败结论与测试报告。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    }
+  ],
+  "outputs": [],
+  "properties": [],
+  "order": 24
+}

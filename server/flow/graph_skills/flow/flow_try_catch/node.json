@@ -1,0 +1,68 @@
+{
+  "type": "flow/try_catch",
+  "category": "控制流",
+  "title": "异常捕获",
+  "description": "执行受保护分支；若分支抛出异常，则捕获异常、输出错误信息并执行异常处理分支。处理完成后继续 done；未异常时直接继续 done。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "try",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "受保护分支：这里的异常会被本节点捕获"
+    },
+    {
+      "name": "catch",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "异常处理分支：受保护分支抛错后执行"
+    },
+    {
+      "name": "done",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "结束分支：受保护分支正常完成或异常处理完成后继续"
+    },
+    {
+      "name": "error",
+      "type": "text",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "捕获到的异常消息"
+    },
+    {
+      "name": "error_type",
+      "type": "text",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "捕获到的异常类型名"
+    },
+    {
+      "name": "error_node",
+      "type": "number",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "最先抛出异常的节点 id"
+    }
+  ],
+  "properties": [],
+  "order": 29
+}

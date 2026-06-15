@@ -1,0 +1,19 @@
+{
+  "type": "flow/start",
+  "category": "控制流",
+  "title": "开始",
+  "description": "流程入口：运行从这里开始。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "流程起点，连向第一个节点"
+    }
+  ],
+  "properties": [],
+  "order": 25
+}

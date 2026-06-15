@@ -1,0 +1,72 @@
+{
+  "type": "device/pve",
+  "category": "设备",
+  "title": "PVE 设备",
+  "description": "通过 Proxmox VE API 连接虚拟机控制台作为被测设备。仅需 websocket-client。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "设备句柄：连「设备属性」取出 video/mouse/keyboard 等能力，或直接连「人机交互」「脚本」"
+    }
+  ],
+  "properties": [
+    {
+      "name": "host",
+      "type": "string",
+      "default": "127.0.0.1",
+      "desc": "PVE 主机地址"
+    },
+    {
+      "name": "port",
+      "type": "int",
+      "default": 8006,
+      "desc": "PVE Web 端口（默认 8006）"
+    },
+    {
+      "name": "node",
+      "type": "string",
+      "default": "pve",
+      "desc": "PVE 节点名"
+    },
+    {
+      "name": "vmid",
+      "type": "int",
+      "default": 100,
+      "desc": "虚拟机 ID"
+    },
+    {
+      "name": "vmtype",
+      "type": "enum",
+      "default": "qemu",
+      "desc": "虚拟机类型：qemu(虚拟机) / lxc(容器)",
+      "options": [
+        "qemu",
+        "lxc"
+      ]
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "default": "root@pam",
+      "desc": "登录用户名（含认证域，如 root@pam）"
+    },
+    {
+      "name": "password",
+      "type": "password",
+      "default": "",
+      "desc": "登录密码"
+    },
+    {
+      "name": "verify_tls",
+      "type": "bool",
+      "default": false,
+      "desc": "是否校验 TLS 证书"
+    }
+  ],
+  "order": 3
+}

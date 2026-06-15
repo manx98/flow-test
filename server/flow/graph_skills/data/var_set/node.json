@@ -1,0 +1,29 @@
+{
+  "type": "var/set",
+  "category": "数据",
+  "title": "设变量",
+  "description": "把每个已连动态端口的值写入同名变量——一次可设多个。「+ 变量」起名加端口（端口名=变量名），「- 变量」选删。",
+  "script": "set_var(name, value)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [],
+  "order": 36
+}

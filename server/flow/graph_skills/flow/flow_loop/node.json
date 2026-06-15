@@ -1,0 +1,44 @@
+{
+  "type": "flow/loop",
+  "category": "控制流",
+  "title": "循环",
+  "description": "循环执行：每轮走 body，达到次数后走 done。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "count",
+      "type": "number",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "循环次数"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "body",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "循环体分支：每轮执行"
+    },
+    {
+      "name": "done",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "结束分支：循环完成后走这里"
+    }
+  ],
+  "properties": [],
+  "order": 27
+}

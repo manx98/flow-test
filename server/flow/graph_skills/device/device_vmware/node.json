@@ -1,0 +1,56 @@
+{
+  "type": "device/vmware",
+  "category": "设备",
+  "title": "VMware 设备",
+  "description": "通过 VMware WebMKS 连接虚拟机控制台作为被测设备。依赖 pyvmomi。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "设备句柄：连「设备属性」取出 video/mouse/keyboard 等能力，或直接连「人机交互」「脚本」"
+    }
+  ],
+  "properties": [
+    {
+      "name": "host",
+      "type": "string",
+      "default": "127.0.0.1",
+      "desc": "vCenter/ESXi 主机地址"
+    },
+    {
+      "name": "port",
+      "type": "int",
+      "default": 443,
+      "desc": "HTTPS 端口（默认 443）"
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "default": "",
+      "desc": "登录用户名"
+    },
+    {
+      "name": "password",
+      "type": "password",
+      "default": "",
+      "desc": "登录密码"
+    },
+    {
+      "name": "vm",
+      "type": "string",
+      "default": "",
+      "desc": "目标虚拟机（名称或 MoID）"
+    },
+    {
+      "name": "verify_tls",
+      "type": "bool",
+      "default": false,
+      "desc": "是否校验 TLS 证书"
+    }
+  ],
+  "order": 4
+}

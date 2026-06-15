@@ -1,0 +1,52 @@
+{
+  "type": "action/scroll",
+  "category": "动作",
+  "title": "滚动",
+  "description": "在给定点坐标处滚动鼠标滚轮。mouse 输入来自「设备属性」。",
+  "script": "scroll(target, dy=-1)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "target",
+      "type": "point",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "滚动位置（点坐标）"
+    },
+    {
+      "name": "mouse",
+      "type": "mouse",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "目标设备的鼠标能力（来自「设备属性」）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [
+    {
+      "name": "dy",
+      "type": "int",
+      "default": -1,
+      "desc": "滚动量（负=向下，正=向上）"
+    }
+  ],
+  "order": 18
+}

@@ -1,0 +1,29 @@
+{
+  "type": "vision/preview",
+  "category": "视觉",
+  "title": "图片预览",
+  "description": "显示连入的图片，支持滚轮缩放 / 右键拖拽平移；可串在图片连线中间查看，原样透传。",
+  "inputs": [
+    {
+      "name": "picture",
+      "type": "picture",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要预览的图片"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "picture",
+      "type": "picture",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "原样透传输入图片"
+    }
+  ],
+  "properties": [],
+  "widget": "preview",
+  "order": 7
+}

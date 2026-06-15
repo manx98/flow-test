@@ -212,8 +212,18 @@ class Project:
             "created_at": now,
             "updated_at": now,
             "messages": [],
-            "draft": None,
+            "documents": [],
             "form_values": {},
+            "tool_permissions": {
+                "auto_approved_tools": [],
+            },
+            "build_state": {
+                "status": "idle",
+                "last_error": "",
+                "stop_reason": "",
+                "steps": [],
+                "rejected_operations": [],
+            },
         }
         self.save_ai_session(sid, session)
         return session
@@ -232,14 +242,30 @@ class Project:
         session = dict(session or {})
         session["id"] = _safe_name(session_id)
         session["updated_at"] = now
-        session.setdefault("created_at", now)
-        session.setdefault("title", "AI 会话")
-        session.setdefault("messages", [])
-        session.setdefault("draft", None)
-        session.setdefault("form_values", {})
+        if "created_at" not in session:
+            session["created_at"] = now
+        clean = {
+            "id": session["id"],
+            "title": session.get("title") or "AI 会话",
+            "created_at": session["created_at"],
+            "updated_at": session["updated_at"],
+            "messages": session.get("messages") if isinstance(session.get("messages"), list) else [],
+            "documents": session.get("documents") if isinstance(session.get("documents"), list) else [],
+            "form_values": session.get("form_values") if isinstance(session.get("form_values"), dict) else {},
+            "tool_permissions": session.get("tool_permissions") if isinstance(session.get("tool_permissions"), dict) else {
+                "auto_approved_tools": [],
+            },
+            "build_state": session.get("build_state") if isinstance(session.get("build_state"), dict) else {
+                "status": "idle",
+                "last_error": "",
+                "stop_reason": "",
+                "steps": [],
+                "rejected_operations": [],
+            },
+        }
         with open(self.ai_session_path(session_id), "w", encoding="utf-8") as f:
-            json.dump(session, f, ensure_ascii=False, indent=2)
-        return session
+            json.dump(clean, f, ensure_ascii=False, indent=2)
+        return clean
 
     def delete_ai_session(self, session_id: str) -> None:
         path = self.ai_session_path(session_id)

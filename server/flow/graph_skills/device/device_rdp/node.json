@@ -1,0 +1,85 @@
+{
+  "type": "device/rdp",
+  "category": "设备",
+  "title": "RDP/xrdp 设备",
+  "description": "通过 RDP 协议连接 Windows/xrdp 远程桌面作为被测设备。依赖 aardwolf。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "设备句柄：连「设备属性」取出 video/mouse/keyboard 等能力，或直接连「人机交互」「脚本」"
+    }
+  ],
+  "properties": [
+    {
+      "name": "host",
+      "type": "string",
+      "default": "127.0.0.1",
+      "desc": "RDP 主机地址"
+    },
+    {
+      "name": "port",
+      "type": "int",
+      "default": 3389,
+      "desc": "RDP 端口（默认 3389）"
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "default": "",
+      "desc": "登录用户名"
+    },
+    {
+      "name": "password",
+      "type": "password",
+      "default": "",
+      "desc": "登录密码"
+    },
+    {
+      "name": "domain",
+      "type": "string",
+      "default": "",
+      "desc": "登录域（可空）"
+    },
+    {
+      "name": "auth",
+      "type": "enum",
+      "default": "auto",
+      "desc": "认证方式：auto 自动 / tls / nla",
+      "options": [
+        "auto",
+        "tls",
+        "nla"
+      ]
+    },
+    {
+      "name": "width",
+      "type": "int",
+      "default": 1280,
+      "desc": "请求的桌面宽度"
+    },
+    {
+      "name": "height",
+      "type": "int",
+      "default": 800,
+      "desc": "请求的桌面高度"
+    },
+    {
+      "name": "connect_timeout",
+      "type": "number",
+      "default": 60,
+      "desc": "RDP 握手超时秒数；调试模式建议 60+"
+    },
+    {
+      "name": "first_update_timeout",
+      "type": "number",
+      "default": 30,
+      "desc": "等待首帧桌面超时秒数；xrdp/调试模式建议 30+"
+    }
+  ],
+  "order": 2
+}

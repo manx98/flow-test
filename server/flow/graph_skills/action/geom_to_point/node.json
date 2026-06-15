@@ -1,0 +1,55 @@
+{
+  "type": "geom/to_point",
+  "category": "动作",
+  "title": "坐标转换",
+  "description": "把找图/OCR 的 match 按锚点 + 偏移算成点坐标，供动作使用。",
+  "script": "to_point(match, anchor='center', dx=0, dy=0)",
+  "inputs": [
+    {
+      "name": "match",
+      "type": "match",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "找图/找文字输出的命中结果"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "point",
+      "type": "point",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "算出的点坐标，供动作 target 使用"
+    }
+  ],
+  "properties": [
+    {
+      "name": "anchor",
+      "type": "enum",
+      "default": "center",
+      "desc": "锚点：取矩形的哪个位置",
+      "options": [
+        "center",
+        "top-left",
+        "top-right",
+        "bottom-left",
+        "bottom-right"
+      ]
+    },
+    {
+      "name": "dx",
+      "type": "int",
+      "default": 0,
+      "desc": "X 方向像素偏移"
+    },
+    {
+      "name": "dy",
+      "type": "int",
+      "default": 0,
+      "desc": "Y 方向像素偏移"
+    }
+  ],
+  "order": 14
+}

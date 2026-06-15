@@ -1,0 +1,36 @@
+{
+  "type": "wait/delay",
+  "category": "等待",
+  "title": "延时",
+  "description": "固定延时若干秒后继续。",
+  "script": "delay(seconds=1.0)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [
+    {
+      "name": "seconds",
+      "type": "number",
+      "default": 1.0,
+      "desc": "延时秒数"
+    }
+  ],
+  "order": 22
+}

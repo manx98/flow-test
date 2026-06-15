@@ -5,14 +5,14 @@ import asyncio
 import json
 import os
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .models import AISessionBody, CheckReq, CompleteReq, CreateProject, FlowGraph, Meta, RenameImage, Settings
 from .project import Project, list_projects, load_settings, save_settings
-from .i18n import lang_from_accept_language, localize_catalog, tr, translate_error
+from .i18n import lang_from_accept_language, localize_catalog, normalize_lang, tr, translate_error
 
 app = FastAPI(title="flow-test 测试工作流服务端")
 
@@ -236,6 +236,16 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+_END = object()
+
+
+def _next_or_end(iterator):
+    try:
+        return next(iterator)
+    except StopIteration:
+        return _END
+
+
 @app.get("/api/projects/{name}/ai/sessions")
 def api_list_ai_sessions(name: str, request: Request):
     return {"sessions": _require(name, _lang(request)).list_ai_sessions()}
@@ -345,7 +355,11 @@ async def api_ai_flow_draft_stream(name: str, session_id: str, request: Request,
                 "status": "done",
             })
             draft_emitted = False
-            for event in generate_draft_stream(payload, docs, lang):
+            events = iter(generate_draft_stream(payload, docs, lang))
+            while True:
+                event = await asyncio.to_thread(_next_or_end, events)
+                if event is _END:
+                    break
                 etype = event.get("type")
                 if etype == "message":
                     yield _sse("message", {"content": event.get("content", "")})
@@ -405,11 +419,205 @@ def _merge_ai_docs(saved_docs: list, uploaded_docs: list) -> list[dict]:
     return merged
 
 
+def _websocket_lang(websocket: WebSocket) -> str:
+    qlang = websocket.query_params.get("lang")
+    if qlang:
+        return normalize_lang(qlang)
+    return lang_from_accept_language(websocket.headers.get("accept-language"))
+
+
+async def _safe_ws_send(websocket: WebSocket, data: dict) -> None:
+    try:
+        await websocket.send_json(data)
+    except WebSocketDisconnect as e:
+        raise e
+    except Exception as e:
+        raise WebSocketDisconnect(code=1006) from e
+
+
+def _stopped_reason_message(reason: str, lang: str) -> str:
+    messages = {
+        "max_tool_calls": tr(lang, "ai_builder.ws.max_tool_calls_reached",
+                             "AI 搭建已停止：已达最大工具调用上限，可在「设置 → AI 辅助搭建模型」中增大上限后继续。"),
+        "max_repair_rounds": tr(lang, "ai_builder.ws.max_repair_rounds_reached",
+                                "AI 搭建已停止：已达最大修复次数上限，可在「设置 → AI 辅助搭建模型」中增大上限后继续。"),
+        "timeout": tr(lang, "ai_builder.ws.timeout_reached",
+                      "AI 搭建已停止：总超时，可在「设置 → AI 辅助搭建模型」中增大超时后继续。"),
+    }
+    return messages.get(reason, tr(lang, "ai_builder.ws.stopped", "AI 搭建已停止：{reason}", reason=reason))
+
+
+@app.websocket("/ws/ai-build/{name}/{session_id}")
+async def ws_ai_build(websocket: WebSocket, name: str, session_id: str):
+    await websocket.accept()
+    lang = _websocket_lang(websocket)
+    stopped = False
+    stop_reason = ""
+    try:
+        p = _require(name, lang)
+        session = p.load_ai_session(session_id)
+        init = await websocket.receive_json()
+        if init.get("type") != "init":
+            await websocket.send_json({"type": "error", "message": tr(lang, "ai_builder.ws.bad_init", "AI 搭建初始化消息格式错误")})
+            return
+        saved_docs = session.get("documents") or []
+        init_docs = init.get("documents") or []
+        docs = _merge_ai_docs(saved_docs, init_docs)
+        session["documents"] = docs
+        build_state = session.get("build_state") if isinstance(session.get("build_state"), dict) else {}
+        build_state.update({"status": "running", "last_error": "", "stop_reason": ""})
+        build_state.setdefault("steps", [])
+        build_state.setdefault("rejected_operations", [])
+        session["build_state"] = build_state
+        p.save_ai_session(session_id, session)
+
+        pending_results: dict[str, dict] = {}
+        incoming: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def reader_loop():
+            nonlocal stopped, stop_reason
+            while True:
+                msg = await websocket.receive_json()
+                if msg.get("type") == "stop":
+                    stopped = True
+                    stop_reason = msg.get("reason") or "user_stop"
+                    await incoming.put(msg)
+                    break
+                await incoming.put(msg)
+
+        reader_task = asyncio.create_task(reader_loop())
+
+        async def on_event(event: dict) -> None:
+            nonlocal session
+            etype = event.get("type")
+            if etype == "tool_step":
+                session = p.load_ai_session(session_id)
+                state = session.get("build_state") or {}
+                steps = state.get("steps") if isinstance(state.get("steps"), list) else []
+                steps.append(event.get("step") or {})
+                state["steps"] = steps
+                session["build_state"] = state
+                p.save_ai_session(session_id, session)
+            await _safe_ws_send(websocket, event)
+
+        async def send_tool_call(call: dict) -> None:
+            await _safe_ws_send(websocket, call)
+
+        async def wait_tool_result(call_id: str) -> dict:
+            nonlocal stopped, stop_reason, session
+            while True:
+                if call_id in pending_results:
+                    return pending_results.pop(call_id)
+                msg = await incoming.get()
+                mtype = msg.get("type")
+                if mtype == "stop":
+                    raise RuntimeError("AI_BUILD_STOPPED")
+                if mtype == "tool_result":
+                    tid = msg.get("tool_call_id") or msg.get("id")
+                    if tid == call_id:
+                        if msg.get("status") == "rejected":
+                            session = p.load_ai_session(session_id)
+                            state = session.get("build_state") or {}
+                            rejected = state.get("rejected_operations") if isinstance(state.get("rejected_operations"), list) else []
+                            rejected.append(msg.get("log") or msg.get("result") or {})
+                            state["rejected_operations"] = rejected
+                            session["build_state"] = state
+                            messages = session.get("messages") if isinstance(session.get("messages"), list) else []
+                            messages.append({
+                                "role": "assistant",
+                                "content": tr(lang, "ai_builder.ws.rejected_hint",
+                                              "用户拒绝了 AI 操作，AI 已停止，当前半成品保留。后续应优先避免重复该操作，除非用户补充说明后确有必要。"),
+                            })
+                            session["messages"] = messages
+                            p.save_ai_session(session_id, session)
+                        return msg
+                    pending_results[str(tid)] = msg
+
+        def should_stop() -> bool:
+            return stopped
+
+        from .flow.ai_builder import AIBuilderError, AIBuilderStopped, run_ai_build_loop
+        try:
+            result = await run_ai_build_loop(init, docs, session, send_tool_call, wait_tool_result, on_event, should_stop, lang)
+            session = p.load_ai_session(session_id)
+            state = session.get("build_state") or {}
+            state["status"] = result.get("status") or "completed"
+            state["stop_reason"] = result.get("reason") or ""
+            session["build_state"] = state
+            p.save_ai_session(session_id, session)
+            await _safe_ws_send(websocket, {"type": "done", **result})
+        except AIBuilderStopped as e:
+            session = p.load_ai_session(session_id)
+            state = session.get("build_state") or {}
+            state["status"] = "stopped"
+            state["stop_reason"] = e.reason
+            session["build_state"] = state
+            p.save_ai_session(session_id, session)
+            await _safe_ws_send(websocket, {"type": "done", "status": "stopped", "reason": e.reason,
+                                             "message": _stopped_reason_message(e.reason, lang)})
+        except RuntimeError as e:
+            if str(e) != "AI_BUILD_STOPPED":
+                raise
+            session = p.load_ai_session(session_id)
+            state = session.get("build_state") or {}
+            state["status"] = "stopped"
+            state["stop_reason"] = stop_reason or "user_stop"
+            session["build_state"] = state
+            p.save_ai_session(session_id, session)
+            await _safe_ws_send(websocket, {"type": "done", "status": "stopped", "reason": state["stop_reason"]})
+        except AIBuilderError as e:
+            session = p.load_ai_session(session_id)
+            state = session.get("build_state") or {}
+            state["status"] = "failed"
+            state["last_error"] = str(e)
+            session["build_state"] = state
+            p.save_ai_session(session_id, session)
+            await _safe_ws_send(websocket, {"type": "error", "message": str(e)})
+            await _safe_ws_send(websocket, {"type": "done", "status": "failed", "reason": "error"})
+        finally:
+            reader_task.cancel()
+            try:
+                await reader_task
+            except (asyncio.CancelledError, Exception):
+                pass
+    except WebSocketDisconnect:
+        try:
+            p = _require(name, lang)
+            session = p.load_ai_session(session_id)
+            state = session.get("build_state") or {}
+            if state.get("status") == "running":
+                state["status"] = "stopped"
+                state["stop_reason"] = "websocket_disconnected"
+                session["build_state"] = state
+                p.save_ai_session(session_id, session)
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            await _safe_ws_send(websocket, {"type": "error", "message": tr(lang, "ai_builder.failed", "AI 生成失败：{error}", error=e)})
+            await _safe_ws_send(websocket, {"type": "done", "status": "failed", "reason": "error"})
+        except Exception:
+            pass
+
+
 # ======================= 节点目录（前端建面板用）=======================
 @app.get("/api/nodes")
 def api_node_catalog(request: Request):
     from .flow.catalog import node_catalog
     return JSONResponse(localize_catalog(node_catalog(), _lang(request)))
+
+
+@app.get("/api/nodes/spec")
+def api_node_spec(type: str, request: Request):
+    from .flow.ai_builder import _read_graph_skill_tool_doc
+    from .flow.catalog import node_catalog
+    lang = _lang(request)
+    catalog = localize_catalog(node_catalog(), lang)
+    spec = next((n for n in catalog.get("nodes", []) if n.get("type") == type), None)
+    if not spec:
+        raise HTTPException(404, tr(lang, "api.node_spec_not_found", "节点类型不存在：{type}", type=type))
+    doc = _read_graph_skill_tool_doc(node_type=type).get("doc") or spec.get("description") or ""
+    return {"ok": True, "spec": spec, "doc": doc}
 
 
 # ======================= WebRTC / WS（M2/M3）=======================

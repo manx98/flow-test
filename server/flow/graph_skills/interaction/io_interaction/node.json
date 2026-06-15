@@ -1,0 +1,20 @@
+{
+  "type": "io/interaction",
+  "category": "交互",
+  "title": "人机交互",
+  "description": "接一个设备句柄：在节点内显示该设备实时画面，鼠标移入即把鼠标/键盘转发回设备；可点「📷 截图」抓帧裁剪并自动生成模板图片节点。",
+  "inputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要显示并交互的设备"
+    }
+  ],
+  "outputs": [],
+  "properties": [],
+  "widget": "video",
+  "order": 6
+}

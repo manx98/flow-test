@@ -1,0 +1,36 @@
+{
+  "type": "script/exec",
+  "category": "脚本",
+  "title": "Python 执行",
+  "description": "执行一个「Python 脚本」定义：script 接脚本句柄。用「+ 入参」加命名输入口（脚本里 get_arg('名') 取）、「+ result」加命名输出口（脚本里 set_result('名', 值) 写）；运行后把各命名结果从对应口输出，并继续执行流。type 下拉决定新增端口的连接类型。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "script",
+      "type": "script",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "脚本定义句柄（来自「Python 脚本」节点）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [],
+  "order": 39
+}

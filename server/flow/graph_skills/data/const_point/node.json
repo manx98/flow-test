@@ -1,0 +1,55 @@
+{
+  "type": "const/point",
+  "category": "数据",
+  "title": "坐标常量",
+  "description": "提供一个固定坐标点，直接供动作使用。接了 x/y 输入则用输入值，否则用属性默认值。",
+  "inputs": [
+    {
+      "name": "x",
+      "type": "number",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "X 坐标（可选，接了用输入值）"
+    },
+    {
+      "name": "y",
+      "type": "number",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "Y 坐标（可选，接了用输入值）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "point",
+      "type": "point",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "点坐标，供动作 target 使用"
+    }
+  ],
+  "properties": [
+    {
+      "name": "x",
+      "type": "int",
+      "default": 0,
+      "desc": "X 坐标默认值"
+    },
+    {
+      "name": "y",
+      "type": "int",
+      "default": 0,
+      "desc": "Y 坐标默认值"
+    },
+    {
+      "name": "备注",
+      "type": "string",
+      "default": "",
+      "desc": "备注：说明此常量的用途（仅展示，不参与运行）"
+    }
+  ],
+  "order": 35
+}

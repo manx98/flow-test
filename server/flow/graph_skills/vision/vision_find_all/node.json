@@ -1,0 +1,68 @@
+{
+  "type": "vision/find_all",
+  "category": "视觉",
+  "title": "找全部",
+  "description": "找出画面中模板的所有匹配，输出匹配列表与数量。",
+  "script": "find_all(template, similarity=0.7)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "video",
+      "type": "video",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "查找源画面（来自设备 video）"
+    },
+    {
+      "name": "template",
+      "type": "picture",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要查找的模板图片"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    },
+    {
+      "name": "matches",
+      "type": "match",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "所有命中结果的列表"
+    },
+    {
+      "name": "count",
+      "type": "number",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "命中数量"
+    }
+  ],
+  "properties": [
+    {
+      "name": "similarity",
+      "type": "number",
+      "default": 0.7,
+      "desc": "相似度阈值（0~1）"
+    }
+  ],
+  "order": 11
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreateProject(BaseModel):
@@ -24,7 +24,7 @@ class Settings(BaseModel):
 
 
 class AISessionBody(BaseModel):
-    session: dict[str, Any] = {}
+    session: dict[str, Any] = Field(default_factory=dict)
 
 
 class RenameImage(BaseModel):

@@ -1,0 +1,55 @@
+{
+  "type": "util/alert",
+  "category": "脚本",
+  "title": "提示",
+  "description": "运行到此弹出非阻塞 toast。接了 text 优先用它，否则用 message。",
+  "script": "alert(message, level='info')",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "提示内容（优先于 message 属性）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [
+    {
+      "name": "message",
+      "type": "string",
+      "default": "",
+      "desc": "默认提示文案（未接 text 时用）"
+    },
+    {
+      "name": "level",
+      "type": "enum",
+      "default": "info",
+      "desc": "提示级别",
+      "options": [
+        "info",
+        "warn",
+        "error"
+      ]
+    }
+  ],
+  "order": 41
+}

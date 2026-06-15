@@ -1,0 +1,26 @@
+{
+  "type": "device/local",
+  "category": "设备",
+  "title": "本地设备",
+  "description": "本机屏幕作为被测设备：采集指定显示器画面，并把鼠标/键盘动作回放到本机。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "device",
+      "type": "device",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "设备句柄：连「设备属性」取出 video/mouse/keyboard 等能力，或直接连「人机交互」「脚本」"
+    }
+  ],
+  "properties": [
+    {
+      "name": "monitor",
+      "type": "int",
+      "default": 1,
+      "desc": "显示器编号（多屏时选第几块，默认 1）"
+    }
+  ],
+  "order": 0
+}

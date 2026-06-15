@@ -1,0 +1,52 @@
+{
+  "type": "action/type",
+  "category": "动作",
+  "title": "输入文本",
+  "description": "在当前焦点处输入文本。keyboard 输入来自「设备属性」，决定在哪台设备上输入。",
+  "script": "type_text(text, paste=False)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要输入的文本"
+    },
+    {
+      "name": "keyboard",
+      "type": "keyboard",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "目标设备的键盘能力（来自「设备属性」）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [
+    {
+      "name": "paste",
+      "type": "bool",
+      "default": false,
+      "desc": "走剪贴板粘贴（适合长文本/中文）"
+    }
+  ],
+  "order": 16
+}

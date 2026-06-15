@@ -1,0 +1,61 @@
+{
+  "type": "action/hotkey",
+  "category": "动作",
+  "title": "快捷键",
+  "description": "发送一个快捷键组合。普通模式按下并释放后走 out；连接 hold 分支时，按住组合键执行 hold 分支，结束后释放再走 out。",
+  "script": "hotkey(keys)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "keys",
+      "type": "text",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "快捷键组合（如 ctrl+c、ctrl+shift+t；接入时覆盖属性）"
+    },
+    {
+      "name": "keyboard",
+      "type": "keyboard",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "目标设备的键盘能力（来自「设备属性」）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "hold",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "按住分支：按下快捷键后执行，分支结束后自动释放"
+    },
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "释放后继续：普通模式或 hold 分支结束后走这里"
+    }
+  ],
+  "properties": [
+    {
+      "name": "keys",
+      "type": "hotkey",
+      "default": "",
+      "desc": "快捷键组合；点击迷你键盘选择",
+      "required": true
+    }
+  ],
+  "order": 17
+}

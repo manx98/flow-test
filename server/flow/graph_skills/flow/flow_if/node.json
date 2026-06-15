@@ -1,0 +1,44 @@
+{
+  "type": "flow/if",
+  "category": "控制流",
+  "title": "条件分支",
+  "description": "按布尔条件走分支：真走 true，假走 false。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "cond",
+      "type": "bool",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "判断条件"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "true",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "条件为真分支"
+    },
+    {
+      "name": "false",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "条件为假分支"
+    }
+  ],
+  "properties": [],
+  "order": 26
+}

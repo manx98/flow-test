@@ -1,0 +1,44 @@
+{
+  "type": "flow/sequence",
+  "category": "控制流",
+  "title": "顺序",
+  "description": "依次执行多个分支：1 → 2 → 3。可用「+ 出口 / - 出口」动态增减出口端口(按槽位顺序执行)。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "1",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "第 1 个执行分支"
+    },
+    {
+      "name": "2",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "第 2 个执行分支"
+    },
+    {
+      "name": "3",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "第 3 个执行分支"
+    }
+  ],
+  "properties": [],
+  "order": 28
+}

@@ -1,0 +1,34 @@
+{
+  "type": "flow/raise",
+  "category": "控制流",
+  "title": "异常抛出",
+  "description": "主动抛出异常：用于让流程失败，或配合「异常捕获」节点进入异常处理分支。message 输入优先于 message 属性。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "message",
+      "type": "text",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "异常消息；未连接或为空时使用 message 属性"
+    }
+  ],
+  "outputs": [],
+  "properties": [
+    {
+      "name": "message",
+      "type": "string",
+      "default": "主动抛出异常",
+      "desc": "默认异常消息"
+    }
+  ],
+  "order": 30
+}

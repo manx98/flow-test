@@ -1,0 +1,90 @@
+{
+  "type": "vision/find_text",
+  "category": "视觉",
+  "title": "找文字(OCR)",
+  "description": "用 OCR 在设备画面里查找文字：命中走 found 并输出 match，否则走 notFound。必须连接 OCR 引擎。match 可接「坐标转换」组件转换为 point，再接「点击/滚动/拖拽」等动作节点。",
+  "script": "find_text(text, regex=False, ocr=None, timeout=0)",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "video",
+      "type": "video",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "查找源画面（来自设备 video）"
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "要查找的文字（或正则）"
+    },
+    {
+      "name": "ocr",
+      "type": "ocr",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "OCR 引擎实例；必须连接 PaddleOCR 或 Tesseract OCR 引擎"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "found",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "命中分支：识别到目标文字时走这里"
+    },
+    {
+      "name": "notFound",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "未命中分支：未识别到时走这里"
+    },
+    {
+      "name": "match",
+      "type": "match",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "命中文字的位置矩形 + 置信度；可接「坐标转换」组件转换为 point 类型，用于点击、滚动、拖拽等动作操作"
+    },
+    {
+      "name": "ok",
+      "type": "bool",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "是否命中（true/false）"
+    }
+  ],
+  "properties": [
+    {
+      "name": "regex",
+      "type": "bool",
+      "default": false,
+      "desc": "把 text 当正则表达式匹配"
+    },
+    {
+      "name": "timeout",
+      "type": "number",
+      "default": 0,
+      "desc": "等待秒数：0=只查一次，>0=在超时内反复查"
+    }
+  ],
+  "order": 10
+}

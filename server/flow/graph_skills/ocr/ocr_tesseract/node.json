@@ -1,0 +1,39 @@
+{
+  "type": "ocr/tesseract",
+  "category": "OCR",
+  "title": "Tesseract 引擎",
+  "description": "提供 Tesseract OCR 引擎实例，连到「找文字」的 ocr 输入。需 pytesseract + 系统 tesseract。引擎按配置全局缓存复用。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "ocr",
+      "type": "ocr",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "OCR 引擎实例（连到「找文字」的 ocr）"
+    }
+  ],
+  "properties": [
+    {
+      "name": "lang",
+      "type": "string",
+      "default": "eng",
+      "desc": "识别语言（如 eng、chi_sim）"
+    },
+    {
+      "name": "config",
+      "type": "string",
+      "default": "",
+      "desc": "传给 tesseract 的额外配置参数"
+    },
+    {
+      "name": "min_confidence",
+      "type": "number",
+      "default": 0,
+      "desc": "最低置信度阈值（低于则丢弃）"
+    }
+  ],
+  "order": 12,
+  "title_package": "pytesseract"
+}

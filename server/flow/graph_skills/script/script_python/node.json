@@ -1,0 +1,127 @@
+{
+  "type": "script/python",
+  "category": "脚本",
+  "title": "Python 脚本",
+  "description": "脚本定义（不自己执行）：在多行编辑器写 Python，输出一个 script 句柄，连到「Python 执行」运行。代码里用 get_arg('名') 取入参（设备类入参自动包成 ScriptDevice，带 find_image/click/… 方法）、set_result('名', 值) 设命名结果。入参/结果由「Python 执行」上动态增减的端口提供/接收。",
+  "functions": [
+    {
+      "sig": "设备.find_image(template, similarity=0.7, mask=None, timeout=0)",
+      "desc": "找图：命中返回 Match，否则 None（等价「找图」）"
+    },
+    {
+      "sig": "设备.find_text(text, regex=False, ocr=None, timeout=0)",
+      "desc": "找文字(OCR)：命中返回 Match，否则 None（等价「找文字」）"
+    },
+    {
+      "sig": "设备.find_all(template, similarity=0.7)",
+      "desc": "找全部：返回所有命中的 Match 列表（等价「找全部」）"
+    },
+    {
+      "sig": "设备.wait_appear(template, timeout=10, mask=None)",
+      "desc": "等出现：出现返回 Match，超时 None（等价「等出现」）"
+    },
+    {
+      "sig": "设备.wait_vanish(template, timeout=10, mask=None)",
+      "desc": "等消失：消失 True，超时 False（等价「等消失」）"
+    },
+    {
+      "sig": "设备.click(target, button='left', double=False)",
+      "desc": "在点坐标点击；target 可为 Location/Match（等价「点击」）"
+    },
+    {
+      "sig": "设备.type_text(text, paste=False)",
+      "desc": "输入文本；paste=True 走剪贴板粘贴（等价「输入文本」）"
+    },
+    {
+      "sig": "设备.hotkey(keys)",
+      "desc": "快捷键：按下并释放组合键，如 ctrl+c / alt+f4（等价「快捷键」）"
+    },
+    {
+      "sig": "设备.hold_keys(keys)",
+      "desc": "按住快捷键：作为上下文管理器使用，退出时自动释放（等价「快捷键」hold 分支）"
+    },
+    {
+      "sig": "设备.scroll(target, dy=-1)",
+      "desc": "在点坐标滚动滚轮（等价「滚动」）"
+    },
+    {
+      "sig": "设备.drag(src, dst)",
+      "desc": "从 src 点拖拽到 dst 点（等价「拖拽」）"
+    },
+    {
+      "sig": "设备.raw",
+      "desc": "拿到原始 visauto Device（dev.find/dev.mouse 等底层 API）"
+    },
+    {
+      "sig": "image(name)",
+      "desc": "按文件名加载模板图片（等价「模板图片」）"
+    },
+    {
+      "sig": "to_point(match, anchor='center', dx=0, dy=0)",
+      "desc": "Match→坐标点，再加偏移（等价「坐标转换」）"
+    },
+    {
+      "sig": "delay(seconds=1.0)",
+      "desc": "延时若干秒，可被中止（等价「延时」）"
+    },
+    {
+      "sig": "log(value, label='')",
+      "desc": "把值写入运行日志（等价「日志」）"
+    },
+    {
+      "sig": "alert(message, level='info')",
+      "desc": "弹出非阻塞提示，level=info/warn/error（等价「提示」）"
+    },
+    {
+      "sig": "get_var(name, default=None)",
+      "desc": "读取 flow 变量（等价「取变量」）"
+    },
+    {
+      "sig": "set_var(name, value)",
+      "desc": "写入 flow 变量（等价「设变量」）"
+    }
+  ],
+  "injects": [
+    {
+      "name": "get_arg(name, default=None)",
+      "desc": "取入参（「Python 执行」上同名入参口的值）；设备/脚本值自动包成 ScriptDevice/可调用（.raw 取原始）"
+    },
+    {
+      "name": "set_result(name, value)",
+      "desc": "设置命名结果，从「Python 执行」上同名 result 输出口输出"
+    },
+    {
+      "name": "visauto",
+      "desc": "visauto 模块（Image / Pattern / Location / Region / Match / Key 等）"
+    },
+    {
+      "name": "Pattern",
+      "desc": "模板匹配类：Pattern(img, similarity=…, mask=…)"
+    },
+    {
+      "name": "vars",
+      "desc": "flow 变量字典（与 get_var/set_var 同一份）"
+    }
+  ],
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "script",
+      "type": "script",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "脚本定义句柄（连到「Python 执行」的 script 输入）"
+    }
+  ],
+  "properties": [
+    {
+      "name": "code",
+      "type": "code",
+      "default": "# pc = get_arg('pc')          # 入参(在「Python 执行」上加同名入参口)\n# m = pc.find_image('btn.png')\n# if m:\n#     pc.click(to_point(m))\n# set_result('ok', m is not None)\n",
+      "desc": "Python 代码（节点内编辑器）"
+    }
+  ],
+  "widget": "code",
+  "order": 38
+}
