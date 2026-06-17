@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..i18n import tr
+from ..check import check_syntax
 from . import types as T
 from .catalog import GRAPH_SKILLS_ROOT, node_catalog
 
@@ -33,6 +34,7 @@ _MAX_SKILL_CONTEXT_CHARS = 52000
 _MAX_SELECTED_CATEGORIES = 5
 _MAX_SELECTED_NODES = 14
 _MAX_TOOL_ROUNDS = 6
+_SCRIPT_EXEC_DYNAMIC_TYPES = {"match", "point", "text", "number", "bool", "picture", "mask", "ocr", "device", "script"}
 
 
 class AIBuilderError(RuntimeError):
@@ -719,11 +721,16 @@ Required JSON shape:
 
 Rules:
 - Use ONLY node types, input names, output names, and property names from Graph Skills node.json.
+- For script/exec only, you may add dynamic data ports by declaring "inputs" and/or "outputs" on the node. Dynamic port types must be one of: match, point, text, number, bool, picture, mask, ocr, device, script.
 - Use current canvas nodes as external references with id format external:<canvas_node_id>.
 - Link exec ports to exec ports, and data ports to compatible data ports only.
 - If the current canvas has an unused flow/start, do not create another start; set entry to the first generated exec node and the backend will connect it.
 - If there is no device node on the current canvas, create the configured device node plus device/attrs. Connect device outputs to actions and vision nodes as needed.
 - For visible text, prefer OCR/vision text nodes. For exact pictures/icons, use the selected external const/image node and optional mask/create node when supplied.
+- Use script/python + script/exec only when it materially simplifies complex logic: loops, repeated UI operations, combined conditions, variable calculations, or tangled graph wiring. Keep simple click/wait/OCR/assert flows as visual nodes.
+- When using Python scripts, pass external resources through script/exec inputs: devices, template pictures, masks, OCR engines, text, numbers, and booleans. Do not hard-code secrets, device settings, image names, or screen coordinates unless the user explicitly asks.
+- Script business failures should usually call set_result('ok', boolean) and connect that bool to assert/check and test/result. Reserve raise for unexpected errors.
+- AI-generated scripts must not use file, network, OS, subprocess, eval, exec, or package-install operations.
 - Include a test/result node when the flow has a natural completion.
 - Return a complete revised graph patch, not a diff.
 - Use concise Chinese text when the user's case is Chinese; otherwise use the user's language.
@@ -814,7 +821,9 @@ def _choose_graph_skill_refs(ai_cfg: dict, state: dict, docs: list[dict], previo
                 "You select which Graph Skills documentation must be read before building a LiteGraph test "
                 "flow. Return ONLY JSON: {\"categories\":[\"action\"], \"node_types\":[\"action/click\"]}. "
                 "Choose the smallest useful set. Include nodes needed for data, device attributes, execution "
-                "flow, waits, assertions, and result reporting when relevant."
+                "flow, waits, assertions, and result reporting when relevant. Include script/python and "
+                "script/exec when the request mentions scripts/simplification/complex logic or needs loops, "
+                "repeated UI actions, combined conditions, variable calculations, or otherwise tangled wiring."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -1031,6 +1040,15 @@ def _heuristic_skill_refs(state: dict, docs: list[dict], previous_patch: dict | 
         "条件": ["flow/if"],
         "变量": ["var/set", "var/get"],
         "脚本": ["script/python", "script/exec"],
+        "script": ["script/python", "script/exec"],
+        "python": ["script/python", "script/exec"],
+        "复杂": ["script/python", "script/exec", "assert/check", "test/result"],
+        "简化": ["script/python", "script/exec", "assert/check", "test/result"],
+        "重复": ["script/python", "script/exec"],
+        "计算": ["script/python", "script/exec", "assert/check"],
+        "complex": ["script/python", "script/exec", "assert/check", "test/result"],
+        "simplify": ["script/python", "script/exec", "assert/check", "test/result"],
+        "repeat": ["script/python", "script/exec"],
     }
     for key, types in keyword_types.items():
         if key in haystack:
@@ -1129,6 +1147,12 @@ def _normalize_graph_patch(obj: dict) -> dict:
             item["title"] = str(raw.get("title"))[:120]
         if pos:
             item["pos"] = [_num(pos[0], 120), _num(pos[1], 330)]
+        inputs = _normalize_patch_ports(raw.get("inputs"))
+        outputs = _normalize_patch_ports(raw.get("outputs"))
+        if inputs:
+            item["inputs"] = inputs
+        if outputs:
+            item["outputs"] = outputs
         out["nodes"].append(item)
     for raw in links[:180]:
         if not isinstance(raw, dict):
@@ -1145,6 +1169,20 @@ def _normalize_graph_patch(obj: dict) -> dict:
     if not out["entry"] and out["nodes"]:
         out["entry"] = out["nodes"][0]["id"]
     return out
+
+
+def _normalize_patch_ports(raw_ports: Any) -> list[dict]:
+    if not isinstance(raw_ports, list):
+        return []
+    ports = []
+    for raw in raw_ports[:40]:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()[:80]
+        ptype = str(raw.get("type") or "").strip()[:40]
+        if name and ptype:
+            ports.append({"name": name, "type": ptype})
+    return ports
 
 
 def _has_device_source(graph: dict) -> bool:
@@ -1185,7 +1223,7 @@ class _GraphPatchCompiler:
         self.lang = lang
         self.catalog = {n["type"]: n for n in node_catalog().get("nodes", [])}
         self.current_specs = {
-            f"external:{n.get('id')}": self.catalog.get(n.get("type"))
+            f"external:{n.get('id')}": self._effective_spec_for_existing_node(n)
             for n in current_graph.get("nodes") or []
             if n.get("id") is not None
         }
@@ -1196,7 +1234,7 @@ class _GraphPatchCompiler:
         if not nodes:
             raise AIBuilderError(tr(self.lang, "ai_builder.empty_graph_patch",
                                     "模型没有生成任何可用的 Graph Skills 节点。"))
-        local_specs = {n["id"]: self.catalog[n["type"]] for n in nodes}
+        local_specs = {n["id"]: self._effective_spec_for_node(n) for n in nodes}
         links = self._normalize_links(patch.get("links") or [], local_specs)
         entry = self._valid_entry(patch.get("entry"), local_specs)
         start_external = _start_available(self.current_graph) if entry else None
@@ -1237,13 +1275,20 @@ class _GraphPatchCompiler:
         if not (isinstance(pos, list) and len(pos) >= 2):
             pos = [120, 330]
         props = self._normalize_properties(ntype, raw.get("properties") or {})
-        return {
+        inputs = self._normalize_dynamic_ports(ntype, "inputs", raw.get("inputs"))
+        outputs = self._normalize_dynamic_ports(ntype, "outputs", raw.get("outputs"))
+        node = {
             "id": nid,
             "type": ntype,
             "title": str(raw.get("title") or "")[:120],
             "pos": [_num(pos[0], 120), _num(pos[1], 330)],
             "properties": props,
         }
+        if inputs:
+            node["inputs"] = inputs
+        if outputs:
+            node["outputs"] = outputs
+        return node
 
     def _normalize_properties(self, ntype: str, raw_props: dict) -> dict:
         spec = self.catalog[ntype]
@@ -1258,7 +1303,81 @@ class _GraphPatchCompiler:
             for name, value in _sanitize_props(self.device_config.get("properties") or {}).items():
                 if name in allowed and name not in out:
                     out[name] = self._coerce_property(value, allowed[name])
+        if ntype == "script/python":
+            errors = check_syntax(str(out.get("code") or ""), lang=self.lang)
+            if errors:
+                message = errors[0].get("message") or "syntax error"
+                line = errors[0].get("line") or 1
+                raise AIBuilderError(tr(
+                    self.lang, "ai_builder.bad_graph_patch",
+                    "模型生成了无效流程：{value}", value=f"script/python code line {line}: {message}"))
         return _sanitize_props(out)
+
+    def _normalize_dynamic_ports(self, ntype: str, group: str, raw_ports: Any) -> list[dict]:
+        ports = _normalize_patch_ports(raw_ports)
+        if not ports:
+            return []
+        if ntype != "script/exec":
+            raise AIBuilderError(tr(
+                self.lang, "ai_builder.bad_graph_patch",
+                "模型生成了无效流程：{value}", value=f"{ntype} cannot declare dynamic ports"))
+        static = self.catalog[ntype].get(group) or []
+        static_by_name = {p.get("name"): p for p in static}
+        reserved = set(static_by_name)
+        seen = set()
+        out = []
+        for port in ports:
+            name = port["name"]
+            ptype = port["type"]
+            if name in seen:
+                raise AIBuilderError(tr(
+                    self.lang, "ai_builder.bad_graph_patch",
+                    "模型生成了无效流程：{value}", value=f"duplicate dynamic port {name}"))
+            seen.add(name)
+            if name in static_by_name:
+                if static_by_name[name].get("type") == ptype:
+                    continue
+                raise AIBuilderError(tr(
+                    self.lang, "ai_builder.bad_graph_patch",
+                    "模型生成了无效流程：{value}", value=f"cannot override fixed port {name}"))
+            if name in reserved or ptype == "exec" or ptype not in _SCRIPT_EXEC_DYNAMIC_TYPES:
+                raise AIBuilderError(tr(
+                    self.lang, "ai_builder.bad_graph_patch",
+                    "模型生成了无效流程：{value}", value=f"invalid dynamic port {name}:{ptype}"))
+            out.append({"name": name, "type": ptype})
+        return out
+
+    def _effective_spec_for_node(self, node: dict) -> dict:
+        spec = self.catalog[node["type"]]
+        if node["type"] != "script/exec":
+            return spec
+        merged = dict(spec)
+        merged["inputs"] = [*(spec.get("inputs") or []), *(node.get("inputs") or [])]
+        merged["outputs"] = [*(spec.get("outputs") or []), *(node.get("outputs") or [])]
+        return merged
+
+    def _effective_spec_for_existing_node(self, node: dict) -> dict | None:
+        spec = self.catalog.get(node.get("type"))
+        if not spec:
+            return None
+        if node.get("type") != "script/exec":
+            return spec
+        merged = dict(spec)
+        static_inputs = {p.get("name") for p in spec.get("inputs") or []}
+        static_outputs = {p.get("name") for p in spec.get("outputs") or []}
+        dyn_inputs = [
+            {"name": p.get("name"), "type": p.get("type")}
+            for p in node.get("inputs") or []
+            if p.get("name") and p.get("type") and p.get("name") not in static_inputs
+        ]
+        dyn_outputs = [
+            {"name": p.get("name"), "type": p.get("type")}
+            for p in node.get("outputs") or []
+            if p.get("name") and p.get("type") and p.get("name") not in static_outputs
+        ]
+        merged["inputs"] = [*(spec.get("inputs") or []), *dyn_inputs]
+        merged["outputs"] = [*(spec.get("outputs") or []), *dyn_outputs]
+        return merged
 
     def _coerce_property(self, value, prop: dict):
         ptype = prop.get("type")
@@ -1345,6 +1464,7 @@ _AI_BUILD_TOOLS = {
     "read_node_spec": "read",
     "create_node": "write",
     "set_node_property": "write",
+    "set_node_ports": "write",
     "connect_nodes": "write",
     "delete_node": "write",
     "delete_link": "write",
@@ -1371,6 +1491,21 @@ def ai_build_tool_schemas(lang: str = "zh") -> list[dict]:
         }
 
     ref_desc = "Node reference. Use n1/n2 handles returned by create_node, or external:<canvas_node_id>."
+    port_schema = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "type": {
+                    "type": "string",
+                    "enum": sorted(_SCRIPT_EXEC_DYNAMIC_TYPES),
+                },
+            },
+            "required": ["name", "type"],
+            "additionalProperties": False,
+        },
+    }
     return [
         tool("inspect_canvas", "Read the current LiteGraph canvas summary and known handles.", {
             "include_existing": {"type": "boolean", "default": True},
@@ -1393,6 +1528,11 @@ def ai_build_tool_schemas(lang: str = "zh") -> list[dict]:
             "name": {"type": "string"},
             "value": {},
         }, ["ref", "name", "value"]),
+        tool("set_node_ports", "Set dynamic data inputs and result outputs on a script/exec node.", {
+            "ref": {"type": "string", "description": ref_desc},
+            "inputs": port_schema,
+            "outputs": port_schema,
+        }, ["ref"]),
         tool("connect_nodes", "Connect two nodes by named output/input ports.", {
             "from": {"type": "string", "description": ref_desc},
             "out": {"type": "string"},
@@ -1440,6 +1580,10 @@ Do not output a final graph JSON. Build the graph step by step by calling tools.
 Use list_node_types and read_node_spec before creating unfamiliar nodes. Use only node types, ports, and properties from the catalog.
 Write tools mutate the user's actual canvas and may require confirmation. If a tool fails, inspect/read specs and repair with different parameters.
 If a user previously rejected an operation, treat it as a soft hint and avoid repeating it unless the user explicitly changed requirements.
+Use script/python + script/exec only when it materially simplifies complex logic: loops, repeated UI operations, combined conditions, variable calculations, or tangled graph wiring. Keep simple click/wait/OCR/assert flows as visual nodes.
+When using scripts, create script/python and script/exec, call set_node_ports on script/exec for resource inputs and bool/text/etc result outputs, then connect resources and assertions. Pass devices, template pictures, masks, OCR engines, text, numbers, and booleans through ports instead of hard-coding them.
+Script business failures should usually set_result('ok', boolean) and connect that result to assert/check and test/result. Reserve raise for unexpected errors.
+AI-generated scripts must not use file, network, OS, subprocess, eval, exec, or package-install operations.
 When the graph is structurally complete, call finish_build with a concise summary. The frontend will run validate_canvas; repair any validation errors.
 Never ask the frontend to run the test flow. Do not include hidden reasoning; short visible status messages are enough.
 """.strip()

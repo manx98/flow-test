@@ -15,6 +15,7 @@
       <button @click="openHistory" :disabled="!current">{{ t('app.toolbar.history') }}</button>
       <button @click="openSettings">{{ t('app.toolbar.settings') }}</button>
       <button @click="openAiBuilder" :disabled="!current">{{ t('app.toolbar.aiBuilder') }}</button>
+      <button class="locate-btn" @click="autoLayoutCanvas" :disabled="!current" :title="t('app.toolbar.layoutTitle')">{{ t('app.toolbar.layout') }}</button>
       <button class="locate-btn" @click="locateGraph" :title="t('app.toolbar.locateTitle')">{{ t('app.toolbar.locate') }}</button>
       <select class="lang-select" :value="locale" @change="changeLocale($event.target.value)">
         <option v-for="lang in languages" :key="lang.code" :value="lang.code">{{ lang.label }}</option>
@@ -519,6 +520,358 @@ function locateGraph() {
   ds.offset[1] = (r.height / 2) / scale - (minY + maxY) / 2
   lgcanvas.setDirty(true, true)
 }
+
+function locateNodes(nodes) {
+  if (!graph || !lgcanvas) return
+  const list = (nodes || []).filter(Boolean)
+  if (!list.length) return locateGraph()
+  const ds = lgcanvas.ds
+  const r = stage.value.getBoundingClientRect()
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const th = LiteGraph.NODE_TITLE_HEIGHT || 20
+  for (const n of list) {
+    const w = n.size?.[0] || 180
+    const h = n.size?.[1] || 80
+    minX = Math.min(minX, n.pos[0])
+    minY = Math.min(minY, n.pos[1] - th)
+    maxX = Math.max(maxX, n.pos[0] + w)
+    maxY = Math.max(maxY, n.pos[1] + h)
+  }
+  const pad = 56
+  const bw = Math.max(1, maxX - minX)
+  const bh = Math.max(1, maxY - minY)
+  const scale = Math.max(0.1, Math.min((r.width - pad * 2) / bw, (r.height - pad * 2) / bh, 1.2))
+  ds.scale = scale
+  ds.offset[0] = (r.width / 2) / scale - (minX + maxX) / 2
+  ds.offset[1] = (r.height / 2) / scale - (minY + maxY) / 2
+  lgcanvas.setDirty(true, true)
+}
+
+function selectedGraphNodes() {
+  return Object.values(lgcanvas?.selected_nodes || {}).filter(Boolean)
+}
+
+function installMultiSelectDrag(canvas) {
+  if (!canvas || canvas._flowMultiSelectDragInstalled) return
+  canvas._flowMultiSelectDragInstalled = true
+  const prevProcessNodeSelected = canvas.processNodeSelected
+  canvas.processNodeSelected = function (node, ev) {
+    const selected = this.selected_nodes || {}
+    const keepGroup =
+      node &&
+      node.is_selected &&
+      selected[node.id] &&
+      Object.keys(selected).length > 1 &&
+      ev?.which === 1 &&
+      !ev.shiftKey &&
+      !ev.ctrlKey &&
+      !ev.metaKey
+    if (keepGroup) {
+      this.onNodeSelected && this.onNodeSelected(node)
+      this.setDirty && this.setDirty(true)
+      return
+    }
+    return prevProcessNodeSelected.call(this, node, ev)
+  }
+}
+
+function linkRecords() {
+  const raw = graph?.links || {}
+  return Object.values(raw).map((link) => {
+    if (Array.isArray(link)) {
+      return {
+        id: link[0],
+        origin_id: link[1],
+        origin_slot: link[2],
+        target_id: link[3],
+        target_slot: link[4],
+        type: link[5],
+      }
+    }
+    return {
+      id: link.id,
+      origin_id: link.origin_id,
+      origin_slot: link.origin_slot,
+      target_id: link.target_id,
+      target_slot: link.target_slot,
+      type: link.type,
+    }
+  }).filter((link) => link.origin_id != null && link.target_id != null)
+}
+
+function nodeOutputType(node, slot) {
+  return node?.outputs?.[slot]?.type || ''
+}
+
+function nodeInputType(node, slot) {
+  return node?.inputs?.[slot]?.type || ''
+}
+
+function layoutAnchor(nodes, mode) {
+  const moving = new Set((nodes || []).map((n) => n.id))
+  let minX = Infinity, minY = Infinity, maxX = -Infinity
+  for (const n of graph?._nodes || []) {
+    if (mode === 'right' && moving.has(n.id)) continue
+    const w = n.size?.[0] || 180
+    minX = Math.min(minX, n.pos[0])
+    minY = Math.min(minY, n.pos[1])
+    maxX = Math.max(maxX, n.pos[0] + w)
+  }
+  if (!Number.isFinite(minX)) return { x: 120, y: 120 }
+  if (mode === 'right') return { x: maxX + 100, y: 120 }
+  const selected = nodes || []
+  const sx = Math.min(...selected.map((n) => n.pos?.[0] ?? minX))
+  const sy = Math.min(...selected.map((n) => n.pos?.[1] ?? minY))
+  return { x: Number.isFinite(sx) ? sx : minX, y: Number.isFinite(sy) ? sy : minY }
+}
+
+function layoutComponents(nodes, edges) {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const neighbors = new Map(nodes.map((n) => [n.id, new Set()]))
+  for (const edge of edges) {
+    if (!byId.has(edge.from) || !byId.has(edge.to)) continue
+    neighbors.get(edge.from)?.add(edge.to)
+    neighbors.get(edge.to)?.add(edge.from)
+  }
+  const seen = new Set()
+  const components = []
+  const sorted = [...nodes].sort((a, b) => (a.pos?.[1] || 0) - (b.pos?.[1] || 0) || (a.pos?.[0] || 0) - (b.pos?.[0] || 0))
+  for (const start of sorted) {
+    if (seen.has(start.id)) continue
+    const ids = []
+    const queue = [start.id]
+    seen.add(start.id)
+    while (queue.length) {
+      const id = queue.shift()
+      ids.push(id)
+      for (const next of neighbors.get(id) || []) {
+        if (seen.has(next)) continue
+        seen.add(next)
+        queue.push(next)
+      }
+    }
+    components.push(ids.map((id) => byId.get(id)).filter(Boolean))
+  }
+  return components
+}
+
+function computeNodeDepths(nodes, edges) {
+  const ids = new Set(nodes.map((n) => n.id))
+  const depth = new Map(nodes.map((n) => [n.id, 0]))
+  const relevantEdges = edges.filter((e) => ids.has(e.from) && ids.has(e.to))
+  const outgoing = new Map(nodes.map((n) => [n.id, []]))
+  const indeg = new Map(nodes.map((n) => [n.id, 0]))
+  for (const edge of relevantEdges) {
+    if (!ids.has(edge.from) || !ids.has(edge.to)) continue
+    outgoing.get(edge.from)?.push(edge)
+    indeg.set(edge.to, (indeg.get(edge.to) || 0) + 1)
+  }
+  const inputCount = new Map(indeg)
+  const byPosition = [...nodes].sort((a, b) => (a.pos?.[1] || 0) - (b.pos?.[1] || 0) || (a.pos?.[0] || 0) - (b.pos?.[0] || 0))
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const queue = byPosition.filter((n) => (indeg.get(n.id) || 0) === 0).map((n) => n.id)
+  const visited = new Set()
+  while (queue.length) {
+    const id = queue.shift()
+    visited.add(id)
+    for (const edge of outgoing.get(id) || []) {
+      depth.set(edge.to, Math.max(depth.get(edge.to) || 0, (depth.get(id) || 0) + 1))
+      indeg.set(edge.to, (indeg.get(edge.to) || 0) - 1)
+      if ((indeg.get(edge.to) || 0) === 0) {
+        queue.push(edge.to)
+        queue.sort((a, b) => {
+          const na = byId.get(a)
+          const nb = byId.get(b)
+          return (na?.pos?.[1] || 0) - (nb?.pos?.[1] || 0) || (na?.pos?.[0] || 0) - (nb?.pos?.[0] || 0)
+        })
+      }
+    }
+  }
+  if (visited.size < nodes.length) {
+    for (const node of byPosition) {
+      if (!visited.has(node.id)) {
+        const inbound = relevantEdges.filter((e) => e.to === node.id && visited.has(e.from))
+        const nextDepth = inbound.length ? Math.max(...inbound.map((e) => (depth.get(e.from) || 0) + 1)) : 0
+        depth.set(node.id, Math.max(depth.get(node.id) || 0, nextDepth))
+      }
+    }
+  }
+  for (let i = 0; i < Math.max(1, nodes.length); i += 1) {
+    let changed = false
+    for (const edge of relevantEdges) {
+      const nextDepth = (depth.get(edge.from) || 0) + 1
+      if ((depth.get(edge.to) || 0) < nextDepth) {
+        depth.set(edge.to, nextDepth)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  for (const node of nodes) {
+    if ((inputCount.get(node.id) || 0) !== 0) continue
+    const targets = (outgoing.get(node.id) || []).map((edge) => depth.get(edge.to) ?? 0).filter((value) => value > 0)
+    if (!targets.length) continue
+    depth.set(node.id, Math.max(0, Math.min(...targets) - 1))
+  }
+  return depth
+}
+
+function nodeLayoutHeight(node) {
+  return node?.size?.[1] || 80
+}
+
+function nodeLayoutCenterY(node, yById) {
+  const top = yById.get(node.id)
+  if (top == null) return null
+  return top + nodeLayoutHeight(node) / 2
+}
+
+function autoLayoutNodes(nodes, opts = {}) {
+  if (!graph || !lgcanvas) return false
+  const list = [...new Set((nodes || []).filter(Boolean))]
+  if (!list.length) return false
+  const byId = new Map(list.map((n) => [n.id, n]))
+  const edges = linkRecords()
+    .filter((link) => byId.has(link.origin_id) && byId.has(link.target_id))
+    .map((link) => {
+      const src = byId.get(link.origin_id)
+      const dst = byId.get(link.target_id)
+      const outType = nodeOutputType(src, link.origin_slot)
+      const inType = nodeInputType(dst, link.target_slot)
+      return {
+        from: link.origin_id,
+        to: link.target_id,
+        outSlot: Number(link.origin_slot || 0),
+        inSlot: Number(link.target_slot || 0),
+        kind: outType === 'exec' || inType === 'exec' || link.type === 'exec' ? 'exec' : 'data',
+      }
+    })
+  const anchor = layoutAnchor(list, opts.anchor || 'current')
+  let componentY = anchor.y
+  for (const component of layoutComponents(list, edges)) {
+    const componentIds = new Set(component.map((n) => n.id))
+    const componentEdges = edges.filter((e) => componentIds.has(e.from) && componentIds.has(e.to))
+    const depth = computeNodeDepths(component, componentEdges)
+    const incoming = new Map(component.map((n) => [n.id, []]))
+    const related = new Map(component.map((n) => [n.id, []]))
+    for (const edge of componentEdges) incoming.get(edge.to)?.push(edge)
+    for (const edge of componentEdges) {
+      related.get(edge.from)?.push({ edge, other: edge.to })
+      related.get(edge.to)?.push({ edge, other: edge.from })
+    }
+    const columns = new Map()
+    for (const node of component) {
+      const col = depth.get(node.id) || 0
+      if (!columns.has(col)) columns.set(col, [])
+      columns.get(col).push(node)
+    }
+    const sortedCols = [...columns.keys()].sort((a, b) => a - b)
+    const colWidths = new Map(sortedCols.map((col) => [col, Math.max(...columns.get(col).map((n) => n.size?.[0] || 180), 180)]))
+    let x = anchor.x
+    const colX = new Map()
+    for (const col of sortedCols) {
+      colX.set(col, x)
+      x += (colWidths.get(col) || 180) + 140
+    }
+    let componentHeight = 0
+    const yById = new Map()
+    const originalScore = (node) => {
+      const nodeIn = incoming.get(node.id) || []
+      const execIn = nodeIn.filter((e) => e.kind === 'exec')
+      const dataIn = nodeIn.filter((e) => e.kind !== 'exec')
+      if (execIn.length) return Math.min(...execIn.map((e) => e.outSlot))
+      if (dataIn.length) return 50 + Math.min(...dataIn.map((e) => e.inSlot))
+      return 100
+    }
+    const neighborCenter = (node) => {
+      let total = 0
+      let weight = 0
+      for (const item of related.get(node.id) || []) {
+        const other = component.find((n) => n.id === item.other)
+        if (!other) continue
+        if (Math.abs((depth.get(other.id) || 0) - (depth.get(node.id) || 0)) !== 1) continue
+        const center = nodeLayoutCenterY(other, yById)
+        if (center == null) continue
+        const w = item.edge.kind === 'exec' ? 2 : 1
+        total += center * w
+        weight += w
+      }
+      return weight ? total / weight : null
+    }
+    const connectedInputs = (node) => componentEdges.filter((edge) => edge.to === node.id && (depth.get(edge.from) || 0) < (depth.get(node.id) || 0))
+    const connectedOutputs = (node) => componentEdges.filter((edge) => edge.from === node.id && (depth.get(edge.to) || 0) > (depth.get(node.id) || 0))
+    const alignmentConflicts = (node, top) => {
+      const center = top + nodeLayoutHeight(node) / 2
+      const conflicts = []
+      const inputs = connectedInputs(node)
+      if (inputs.length > 1) {
+        for (const edge of inputs) {
+          const other = component.find((n) => n.id === edge.from)
+          const otherCenter = other ? nodeLayoutCenterY(other, yById) : null
+          if (otherCenter != null) conflicts.push(otherCenter)
+        }
+      }
+      const outputs = connectedOutputs(node)
+      if (outputs.length > 1) {
+        for (const edge of outputs) {
+          const other = component.find((n) => n.id === edge.to)
+          const otherCenter = other ? nodeLayoutCenterY(other, yById) : null
+          if (otherCenter != null) conflicts.push(otherCenter)
+        }
+      }
+      return conflicts.filter((otherCenter) => Math.abs(center - otherCenter) < 36)
+    }
+    const avoidAlignedTop = (node, top, minTop) => {
+      let nextTop = top
+      for (let i = 0; i < 6; i += 1) {
+        const conflicts = alignmentConflicts(node, nextTop)
+        if (!conflicts.length) break
+        const center = nextTop + nodeLayoutHeight(node) / 2
+        const nearest = conflicts.sort((a, b) => Math.abs(center - a) - Math.abs(center - b))[0]
+        nextTop = Math.max(minTop, nearest + 36 - nodeLayoutHeight(node) / 2)
+      }
+      return nextTop
+    }
+    const placeColumn = (col) => {
+      const colNodes = columns.get(col)
+      colNodes.sort((a, b) => {
+        const aCenter = neighborCenter(a)
+        const bCenter = neighborCenter(b)
+        if (aCenter != null || bCenter != null) return (aCenter ?? Infinity) - (bCenter ?? Infinity)
+        return originalScore(a) - originalScore(b) || (a.pos?.[1] || 0) - (b.pos?.[1] || 0) || (a.pos?.[0] || 0) - (b.pos?.[0] || 0)
+      })
+      let y = componentY
+      for (const node of colNodes) {
+        node.pos[0] = colX.get(col)
+        const center = neighborCenter(node)
+        const preferredTop = center == null ? y : center - nodeLayoutHeight(node) / 2
+        node.pos[1] = avoidAlignedTop(node, Math.max(y, preferredTop), y)
+        yById.set(node.id, node.pos[1])
+        y = node.pos[1] + nodeLayoutHeight(node) + 80
+      }
+      componentHeight = Math.max(componentHeight, y - componentY)
+    }
+    for (const col of sortedCols) placeColumn(col)
+    for (let i = 0; i < 3; i += 1) {
+      componentHeight = 0
+      for (const col of sortedCols) placeColumn(col)
+      for (const col of [...sortedCols].reverse()) placeColumn(col)
+    }
+    componentY += Math.max(componentHeight, 120) + 140
+  }
+  lgcanvas.setDirty(true, true)
+  if (opts.locate !== false) locateNodes(list)
+  if (opts.history !== false) scheduleGraphHistory()
+  return true
+}
+
+function autoLayoutCanvas() {
+  const selected = selectedGraphNodes()
+  const nodes = selected.length ? selected : (graph?._nodes || [])
+  if (!autoLayoutNodes(nodes, { anchor: 'current' })) return
+  status.value = t('app.status.layoutApplied')
+}
+
 function onNodeDragStart(ev, type) {
   ev.dataTransfer.setData('text/node-type', type)
   ev.dataTransfer.effectAllowed = 'copy'
@@ -1018,6 +1371,9 @@ async function startAiBuild(message, files = [], pushUser = false) {
           aiBuildStatus.value = data.status || 'completed'
           if (data.message) addAssistantText(data.message)
           if (data.summary) addAssistantText(data.summary)
+          if (data.status === 'completed') {
+            autoLayoutNodes([...aiBuildHandles.values()], { anchor: 'right' })
+          }
           status.value = data.status === 'completed' ? t('app.aiBuilder.completed') : t('app.aiBuilder.stopped')
           resolve()
         }
@@ -1116,6 +1472,7 @@ async function runAiCanvasTool(tool, args) {
   if (tool === 'read_node_spec') return readAiNodeSpec(args)
   if (tool === 'create_node') return createAiNode(args)
   if (tool === 'set_node_property') return setAiNodeProperty(args)
+  if (tool === 'set_node_ports') return setAiNodePorts(args)
   if (tool === 'connect_nodes') return connectAiNodes(args)
   if (tool === 'delete_node') return deleteAiNode(args)
   if (tool === 'delete_link') return deleteAiLink(args)
@@ -1211,6 +1568,75 @@ function setAiNodeProperty(args) {
   else node.properties[args.name] = value
   markAiGraphChanged()
   return { ok: true }
+}
+
+const AI_SCRIPT_PORT_TYPES = new Set(['match', 'point', 'text', 'number', 'bool', 'picture', 'mask', 'ocr', 'device', 'script'])
+
+function normalizeAiPortRows(rows) {
+  const out = []
+  const seen = new Set()
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const name = String(row?.name || '').trim()
+    const type = String(row?.type || '').trim()
+    if (!name || !type) return { ok: false, error: { code: 'BAD_PORT', message: `${name}:${type}` } }
+    if (seen.has(name)) return { ok: false, error: { code: 'DUPLICATE_PORT', message: name } }
+    if (!AI_SCRIPT_PORT_TYPES.has(type)) return { ok: false, error: { code: 'BAD_PORT_TYPE', message: type } }
+    seen.add(name)
+    out.push({ name, type })
+  }
+  return { ok: true, ports: out }
+}
+
+function setDynamicPorts(node, dir, rows) {
+  const fixed = dir === 'in' ? new Set(['in', 'script']) : new Set(['out'])
+  const list = () => (dir === 'in' ? node.inputs : node.outputs) || []
+  const find = (name) => (dir === 'in' ? node.findInputSlot(name) : node.findOutputSlot(name))
+  const del = (slot) => (dir === 'in' ? node.removeInput(slot) : node.removeOutput(slot))
+  const add = (name, type) => (dir === 'in' ? node.addInput(name, type) : node.addOutput(name, type))
+  for (const row of rows) {
+    if (fixed.has(row.name)) return { ok: false, error: { code: 'FIXED_PORT', message: row.name } }
+  }
+  const keep = new Set(rows.map((r) => r.name))
+  for (const port of [...list()]) {
+    if (!fixed.has(port.name) && !keep.has(port.name)) {
+      const slot = find(port.name)
+      if (slot >= 0) del(slot)
+    }
+  }
+  for (const row of rows) {
+    const slot = find(row.name)
+    if (slot >= 0) {
+      const port = list()[slot]
+      if (port.type !== row.type) {
+        port.type = row.type
+        if (dir === 'in') node.disconnectInput(slot)
+        else node.disconnectOutput(slot)
+      }
+    } else {
+      add(row.name, row.type)
+    }
+  }
+  return { ok: true }
+}
+
+function setAiNodePorts(args) {
+  const node = resolveAiNodeRef(args.ref)
+  if (!node) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: String(args.ref || '') } }
+  if (nodeTypeOf(node) !== 'script/exec') return { ok: false, error: { code: 'PORTS_NOT_EDITABLE', message: nodeTypeOf(node) } }
+  if (Object.prototype.hasOwnProperty.call(args || {}, 'inputs')) {
+    const inputs = normalizeAiPortRows(args.inputs)
+    if (!inputs.ok) return inputs
+    const result = setDynamicPorts(node, 'in', inputs.ports)
+    if (!result.ok) return result
+  }
+  if (Object.prototype.hasOwnProperty.call(args || {}, 'outputs')) {
+    const outputs = normalizeAiPortRows(args.outputs)
+    if (!outputs.ok) return outputs
+    const result = setDynamicPorts(node, 'out', outputs.ports)
+    if (!result.ok) return result
+  }
+  markAiGraphChanged()
+  return { ok: true, inputs: node.inputs || [], outputs: node.outputs || [] }
 }
 
 function connectAiNodes(args) {
@@ -1641,6 +2067,24 @@ function connectByName(src, outName, dst, inName) {
   return true
 }
 
+function addDraftPorts(node, spec) {
+  if (nodeTypeOf(node) !== 'script/exec') return
+  const addOne = (dir, port) => {
+    const name = String(port?.name || '').trim()
+    const type = String(port?.type || '').trim()
+    if (!name || !AI_SCRIPT_PORT_TYPES.has(type)) return
+    if (dir === 'in') {
+      if (name === 'in' || name === 'script' || node.findInputSlot(name) >= 0) return
+      node.addInput(name, type)
+    } else {
+      if (name === 'out' || node.findOutputSlot(name) >= 0) return
+      node.addOutput(name, type)
+    }
+  }
+  for (const port of spec.inputs || []) addOne('in', port)
+  for (const port of spec.outputs || []) addOne('out', port)
+}
+
 function applyAiDraft() {
   if (!aiDraft.value || !graph) return
   const draft = aiDraft.value
@@ -1660,6 +2104,7 @@ function applyAiDraft() {
       if (node.setProperty) node.setProperty(key, value)
       else node.properties[key] = value
     }
+    addDraftPorts(node, spec)
     graph.add(node)
     created.set(spec.id, node)
   }
@@ -1680,7 +2125,7 @@ function applyAiDraft() {
 
   refreshGraphI18n()
   lgcanvas && lgcanvas.setDirty(true, true)
-  locateGraph()
+  if (!autoLayoutNodes([...created.values()], { anchor: 'right' })) locateGraph()
   scheduleGraphHistory()
   status.value = t('app.status.aiDraftApplied')
 }
@@ -1705,6 +2150,7 @@ onMounted(async () => {
   graph = new LGraph()
   installGraphHistoryHooks()
   lgcanvas = new LGraphCanvas(canvasEl.value, graph)
+  installMultiSelectDrag(lgcanvas)
   const prevSelectionChange = lgcanvas.onSelectionChange
   lgcanvas.onSelectionChange = function (selectedNodes) {
     prevSelectionChange && prevSelectionChange.call(this, selectedNodes)

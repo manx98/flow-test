@@ -13,6 +13,8 @@ export default {
       history: 'History',
       settings: 'Settings',
       aiBuilder: 'AI Builder',
+      layout: 'Auto Layout',
+      layoutTitle: 'Arrange selected nodes, or all nodes when none are selected',
       locate: 'Locate',
       locateTitle: 'Fit all nodes into view',
     },
@@ -156,6 +158,7 @@ export default {
       maskSaved: 'Saved mask {name}',
       aiDraftReady: 'AI draft flow generated',
       aiDraftApplied: 'AI draft flow applied to canvas',
+      layoutApplied: 'Node layout optimized',
     },
     prompts: {
       projectName: 'Project name',

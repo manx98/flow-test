@@ -13,6 +13,8 @@ export default {
       history: '运行历史',
       settings: '设置',
       aiBuilder: 'AI 搭建',
+      layout: '布局优化',
+      layoutTitle: '整理选中节点；未选中时整理全部节点',
       locate: '定位',
       locateTitle: '居中适配所有节点',
     },
@@ -156,6 +158,7 @@ export default {
       maskSaved: '已保存遮罩 {name}',
       aiDraftReady: 'AI 流程草稿已生成',
       aiDraftApplied: 'AI 流程草稿已应用到画布',
+      layoutApplied: '节点布局已优化',
     },
     prompts: {
       projectName: '工程名',
