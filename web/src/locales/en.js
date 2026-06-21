@@ -237,6 +237,7 @@ export default {
       'const/number': 'Number Constant',
       'const/bool': 'Boolean Constant',
       'const/point': 'Point Constant',
+      'data/text_display': 'Text Display',
       'var/set': 'Set Variable',
       'var/get': 'Get Variable',
       'script/python': 'Python Script',
@@ -262,6 +263,12 @@ export default {
     dialog: {
       password: 'Password',
       saveShortcut: 'Ctrl+Enter to save',
+    },
+    json: {
+      format: 'Format',
+      invalid: 'Invalid JSON',
+      valid: 'Valid JSON',
+      empty: 'Empty JSON',
     },
     help: {
       multiConnect: 'Multiple',

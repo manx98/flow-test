@@ -220,6 +220,12 @@ export default {
       password: '密码',
       saveShortcut: 'Ctrl+Enter 保存',
     },
+    json: {
+      format: '格式化',
+      invalid: 'JSON 无效',
+      valid: 'JSON 有效',
+      empty: '空 JSON',
+    },
     help: {
       multiConnect: '可多连',
       singleConnect: '单连',

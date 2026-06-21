@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import threading
 import time
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import visauto
 from visauto import Pattern, ScriptAborted
@@ -21,7 +25,7 @@ from .graph import GraphModel
 HANDLERS: dict[str, dict] = {}
 
 # 这些节点在 run() 内自行上报状态（pass/fail/日志），_run_node 不再补 ok
-_SELF_REPORT = {"assert/check", "util/log", "util/alert"}
+_SELF_REPORT = {"assert/check", "util/log", "util/alert", "data/text_display"}
 
 
 def handler(ntype, kind):
@@ -280,6 +284,20 @@ def _eval_mask(ctx, node):
 @handler("const/text", "eval")
 def _eval_text(ctx, node):
     return {"text": ctx.graph.prop(node, "value", "")}
+
+
+def _display_text_value(ctx, node):
+    val = ctx.get_input(node, "text")
+    if val in (None, ""):
+        val = ctx.graph.prop(node, "placeholder", "")
+    return "" if val is None else str(val)
+
+
+@handler("data/text_display", "eval")
+def _eval_text_display(ctx, node):
+    text = _display_text_value(ctx, node)
+    ctx.emit({"type": "node_text", "id": node["id"], "text": text})
+    return {"text": text}
 
 
 @handler("const/point", "eval")
@@ -641,6 +659,15 @@ def _run_log(ctx, node):
     return "out"
 
 
+@handler("data/text_display", "run")
+def _run_text_display(ctx, node):
+    text = _display_text_value(ctx, node)
+    ctx.set_output(node, "text", text)
+    ctx.emit({"type": "node_text", "id": node["id"], "text": text})
+    ctx.on_state(node["id"], "ok", text)
+    return "out"
+
+
 @handler("util/alert", "run")
 def _run_alert(ctx, node):
     val = ctx.get_input(node, "text")
@@ -650,6 +677,145 @@ def _run_alert(ctx, node):
     ctx.report.log(ctx.tr("engine.alert_log", "[提示] {message}", message=msg))
     ctx.on_state(node["id"], "ok", msg)
     return "out"
+
+
+def _api_text_input(ctx, node, name: str, prop_name: str | None = None, default: str = "") -> str:
+    value = ctx.get_input(node, name)
+    if value in (None, ""):
+        value = ctx.graph.prop(node, prop_name or name, default)
+    return "" if value is None else str(value)
+
+
+def _api_headers(raw: str) -> dict[str, str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"请求头不是合法 JSON 对象：{e.msg}") from e
+    if not isinstance(data, dict):
+        raise RuntimeError("请求头必须是 JSON 对象，例如 {\"Authorization\":\"Bearer ...\"}")
+    return {str(k): str(v) for k, v in data.items() if v is not None}
+
+
+def _json_default(value):
+    if hasattr(value, "__dict__"):
+        return value.__dict__
+    return str(value)
+
+
+def _json_text_input(ctx, node, name: str = "text", prop_name: str | None = None) -> str:
+    value = ctx.get_input(node, name)
+    if value in (None, ""):
+        value = ctx.graph.prop(node, prop_name or name, "")
+    return "" if value is None else str(value)
+
+
+def _coerce_structured_value(value):
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"文本不是合法 JSON：{e.msg}") from e
+    return value
+
+
+@handler("api/json_serialize", "eval")
+def _eval_json_serialize(ctx, node):
+    value = ctx.get_input(node, "value")
+    if value is None:
+        raw = ctx.graph.prop(node, "value", "")
+        value = _coerce_structured_value(raw) if str(raw).strip() else None
+    indent = 2 if bool(ctx.graph.prop(node, "pretty", False)) else None
+    text = json.dumps(value, ensure_ascii=False, indent=indent, default=_json_default)
+    return {"text": text}
+
+
+@handler("api/json_deserialize", "eval")
+def _eval_json_deserialize(ctx, node):
+    text = _json_text_input(ctx, node)
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"JSON 反序列化失败：{e.msg}") from e
+    return {"value": value}
+
+
+@handler("api/form_serialize", "eval")
+def _eval_form_serialize(ctx, node):
+    value = ctx.get_input(node, "value")
+    if value is None:
+        raw = ctx.graph.prop(node, "value", "")
+        value = _coerce_structured_value(raw) if str(raw).strip() else {}
+    if not isinstance(value, (dict, list, tuple)):
+        raise RuntimeError("表单序列化需要对象、键值对列表或 JSON 对象字符串")
+    text = urllib.parse.urlencode(value, doseq=bool(ctx.graph.prop(node, "doseq", True)))
+    return {"text": text}
+
+
+@handler("api/form_deserialize", "eval")
+def _eval_form_deserialize(ctx, node):
+    text = _json_text_input(ctx, node)
+    keep_blank = bool(ctx.graph.prop(node, "keep_blank_values", True))
+    multi = bool(ctx.graph.prop(node, "multi", False))
+    if multi:
+        value = urllib.parse.parse_qs(text, keep_blank_values=keep_blank)
+    else:
+        value = {}
+        for key, val in urllib.parse.parse_qsl(text, keep_blank_values=keep_blank):
+            value[key] = val
+    return {"value": value, "json": json.dumps(value, ensure_ascii=False)}
+
+
+@handler("api/request", "run")
+def _run_api_request(ctx, node):
+    method = str(ctx.graph.prop(node, "method", "GET") or "GET").upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
+        raise RuntimeError(ctx.tr("engine.api_bad_method", "HTTP 方法不支持：{method}", method=method))
+    url = _api_text_input(ctx, node, "url").strip()
+    if not url:
+        raise RuntimeError(ctx.tr("engine.api_missing_url", "HTTP 请求缺少 URL"))
+    headers = _api_headers(_api_text_input(ctx, node, "headers", default="{}"))
+    body = _api_text_input(ctx, node, "body")
+    body_bytes = body.encode("utf-8") if body and method not in {"GET", "HEAD"} else None
+    if body_bytes is not None and not any(k.lower() == "content-type" for k in headers):
+        content_type = str(ctx.graph.prop(node, "content_type", "application/json; charset=utf-8") or "").strip()
+        if content_type:
+            headers["Content-Type"] = content_type
+    timeout = float(ctx.graph.prop(node, "timeout", 15))
+    fail_on_error = bool(ctx.graph.prop(node, "fail_on_error", False))
+
+    req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+    status = 0
+    text = ""
+    ok = False
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = int(getattr(resp, "status", resp.getcode()))
+            payload = resp.read()
+            charset = resp.headers.get_content_charset() or "utf-8"
+            text = payload.decode(charset, errors="replace")
+            ok = 200 <= status < 400
+    except urllib.error.HTTPError as e:
+        status = int(e.code)
+        payload = e.read()
+        charset = e.headers.get_content_charset() or "utf-8"
+        text = payload.decode(charset, errors="replace")
+        ok = False
+    except urllib.error.URLError as e:
+        text = str(getattr(e, "reason", e))
+        ok = False
+
+    ctx.set_output(node, "status", status)
+    ctx.set_output(node, "body", text)
+    ctx.set_output(node, "ok", ok)
+    if fail_on_error and not ok:
+        raise RuntimeError(ctx.tr("engine.api_request_failed", "HTTP 请求失败：{status} {body}", status=status, body=text[:300]))
+    return "success" if ok else "fail"
 
 
 class ScriptDevice:

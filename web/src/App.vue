@@ -400,6 +400,8 @@ import { getLocale, languages, locale, setLocale, t, tr } from './i18n.js'
 import { VideoOverlay } from './graph/video-overlay.js'
 import { ShotOverlay } from './graph/shot-overlay.js'
 import { CodeOverlay } from './graph/code-overlay.js'
+import { JsonOverlay } from './graph/json-overlay.js'
+import { TextDisplayOverlay } from './graph/text-display-overlay.js'
 import { ErrorOverlay } from './graph/error-overlay.js'
 import { DeviceConnection } from './webrtc/device.js'
 
@@ -2138,6 +2140,8 @@ let lgcanvas = null
 let overlay = null
 let shots = null
 let codes = null
+let jsons = null
+let textDisplays = null
 let errors = null
 
 onMounted(async () => {
@@ -2164,6 +2168,8 @@ onMounted(async () => {
   shots = new ShotOverlay(lgcanvas, overlayEl.value)
   shots.setRenameHandler(onRenameImage)
   codes = new CodeOverlay(lgcanvas, overlayEl.value)
+  jsons = new JsonOverlay(lgcanvas, overlayEl.value)
+  textDisplays = new TextDisplayOverlay(lgcanvas, overlayEl.value)
   errors = new ErrorOverlay(lgcanvas, overlayEl.value)
   const prevForeground = lgcanvas.onDrawForeground
   lgcanvas.onDrawForeground = function (ctx) {
@@ -2173,6 +2179,8 @@ onMounted(async () => {
     overlay.update()
     shots.update(graph._nodes)   // 截图/模板/预览节点画面 + 裁剪框定位
     codes.update(graph._nodes)   // 脚本节点多行代码编辑器
+    jsons.update(graph._nodes)   // JSON 属性内嵌编辑器
+    textDisplays.update(graph._nodes) // 文本展示节点
     errors.update(graph._nodes)  // 运行错误（可选中/可复制）
   }
   setDeviceActionHandler(onDeviceAction)
@@ -2425,7 +2433,7 @@ async function save() {
 const STATUS_COLOR = { running: '#b58900', ok: '#2a7d4f', fail: '#c0392b', skip: '#555' }
 
 function resetNodeColors() {
-  for (const n of graph._nodes) { n.color = null; n.bgcolor = null; n._error = null }
+  for (const n of graph._nodes) { n.color = null; n.bgcolor = null; n._error = null; n._displayText = null }
   lgcanvas.setDirty(true, true)
 }
 
@@ -2455,6 +2463,13 @@ function run() {
     const m = JSON.parse(e.data)
     if (m.type === 'node') setNodeStatus(m.id, m.status, m.info)
     else if (m.type === 'alert') showToast(m.message, m.level)
+    else if (m.type === 'node_text') {
+      const n = graph.getNodeById(m.id)
+      if (n) {
+        n._displayText = m.text == null ? '' : String(m.text)
+        lgcanvas.setDirty(true, true)
+      }
+    }
     else if (m.type === 'node_shot') {   // 找图/找文字/等出现：回显带命中框的画面
       const n = graph.getNodeById(m.id)
       if (n) shots.setImage(n, m.url, { fit: true })

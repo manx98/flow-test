@@ -1,0 +1,32 @@
+{
+  "type": "api/json_serialize",
+  "category": "API",
+  "title": "JSON输入",
+  "description": "直接输入 JSON，并输出规范 JSON 文本。",
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "JSON 文本"
+    }
+  ],
+  "properties": [
+    {
+      "name": "value",
+      "type": "json",
+      "default": "",
+      "desc": "要输入的 JSON 文本"
+    },
+    {
+      "name": "pretty",
+      "type": "bool",
+      "default": false,
+      "desc": "是否格式化输出"
+    }
+  ],
+  "order": 56
+}

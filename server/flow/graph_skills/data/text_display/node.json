@@ -1,0 +1,52 @@
+{
+  "type": "data/text_display",
+  "category": "数据",
+  "title": "文本展示",
+  "description": "展示连入的文本变量，并原样透传文本。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即刷新展示内容"
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "要展示的文本"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：展示完成后继续"
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "原样透传输入文本"
+    }
+  ],
+  "properties": [
+    {
+      "name": "placeholder",
+      "type": "multiline",
+      "default": "",
+      "desc": "未连入文本时展示的占位内容"
+    }
+  ],
+  "widget": "text_display",
+  "order": 39
+}

@@ -156,6 +156,8 @@ function registerOne(spec) {
     this.size = this.computeSize()
     if (this._showVideo || this._showShot) this.size[1] = Math.max(this.size[1], 220)
     if (this._showCode) { this.size[0] = Math.max(this.size[0], 300); this.size[1] = Math.max(this.size[1], 200) }
+    if (this._showJson) { this.size[0] = Math.max(this.size[0], 320); this.size[1] = Math.max(this.size[1], 240) }
+    if (spec.type === 'data/text_display') { this.size[0] = Math.max(this.size[0], 260); this.size[1] = Math.max(this.size[1], 180) }
   }
   NodeClass.title = spec.title
   NodeClass.desc = spec.type
@@ -374,6 +376,44 @@ function addMultilineWidget(node, prop) {
   return w
 }
 
+function addJsonWidget(node, prop) {
+  const name = prop.name
+  node._showJson = true
+  node._jsonPropertyName = name
+  const w = {
+    name: t('graph.json.format'), type: 'json', value: prop.default ?? '',
+    options: { property: name },
+    draw(ctx, node, width, y, H) {
+      if (node.flags && node.flags.collapsed) return
+      const m = 15
+      ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR
+      ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR
+      ctx.beginPath(); ctx.roundRect(m, y, width - m * 2, H, [H * 0.5]); ctx.fill(); ctx.stroke()
+      ctx.save(); ctx.beginPath(); ctx.rect(m, y, width - m * 2, H); ctx.clip()
+      ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR
+      ctx.textAlign = 'center'
+      ctx.fillText(t('graph.json.format'), width / 2, y + H * 0.7)
+      ctx.restore()
+    },
+    mouse(event, pos, node) {
+      if (event.type !== LiteGraph.pointerevents_method + 'down') return false
+      const raw = String(node.properties?.[name] ?? '')
+      if (!raw.trim()) return true
+      try {
+        node.properties[name] = JSON.stringify(JSON.parse(raw), null, 2)
+        this.value = node.properties[name]
+        node.setDirtyCanvas(true, true)
+        requestGraphHistory(node)
+      } catch (_) {
+        node.setDirtyCanvas(true, true)
+      }
+      return true
+    },
+  }
+  node.addCustomWidget(w)
+  return w
+}
+
 const HOTKEY_MODIFIERS = [
   ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift'], ['cmd', 'Cmd/Win'],
 ]
@@ -563,6 +603,8 @@ function addWidgetFor(node, prop) {
       addPasswordWidget(node, prop); break
     case 'multiline':
       addMultilineWidget(node, prop); break
+    case 'json':
+      addJsonWidget(node, prop); break
     case 'hotkey':
       addHotkeyWidget(node, prop); break
     case 'image':

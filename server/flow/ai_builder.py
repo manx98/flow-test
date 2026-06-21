@@ -726,6 +726,7 @@ Rules:
 - Link exec ports to exec ports, and data ports to compatible data ports only.
 - If the current canvas has an unused flow/start, do not create another start; set entry to the first generated exec node and the backend will connect it.
 - If there is no device node on the current canvas, create the configured device node plus device/attrs. Connect device outputs to actions and vision nodes as needed.
+- For HTTP/API calls, use api/request. Use api/json_serialize or api/form_serialize for JSON/form request body conversion. Do not put network calls inside Python scripts.
 - For visible text, prefer OCR/vision text nodes. For exact pictures/icons, use the selected external const/image node and optional mask/create node when supplied.
 - Use script/python + script/exec only when it materially simplifies complex logic: loops, repeated UI operations, combined conditions, variable calculations, or tangled graph wiring. Keep simple click/wait/OCR/assert flows as visual nodes.
 - When using Python scripts, pass external resources through script/exec inputs: devices, template pictures, masks, OCR engines, text, numbers, and booleans. Do not hard-code secrets, device settings, image names, or screen coordinates unless the user explicitly asks.
@@ -1038,7 +1039,11 @@ def _heuristic_skill_refs(state: dict, docs: list[dict], previous_patch: dict | 
         "assert": ["assert/check", "test/result"],
         "循环": ["flow/loop"],
         "条件": ["flow/if"],
-        "变量": ["var/set", "var/get"],
+        "变量": ["var/set", "var/get", "data/text_display"],
+        "展示": ["data/text_display", "var/get"],
+        "显示": ["data/text_display", "var/get"],
+        "查看": ["data/text_display", "var/get", "util/log"],
+        "display": ["data/text_display", "var/get"],
         "脚本": ["script/python", "script/exec"],
         "script": ["script/python", "script/exec"],
         "python": ["script/python", "script/exec"],
@@ -1049,6 +1054,15 @@ def _heuristic_skill_refs(state: dict, docs: list[dict], previous_patch: dict | 
         "complex": ["script/python", "script/exec", "assert/check", "test/result"],
         "simplify": ["script/python", "script/exec", "assert/check", "test/result"],
         "repeat": ["script/python", "script/exec"],
+        "api": ["api/request", "api/json_serialize", "const/text", "assert/check", "test/result"],
+        "http": ["api/request", "api/json_serialize", "const/text", "assert/check", "test/result"],
+        "请求": ["api/request", "api/json_serialize", "const/text", "assert/check", "test/result"],
+        "接口": ["api/request", "api/json_serialize", "const/text", "assert/check", "test/result"],
+        "网络": ["api/request", "api/json_serialize", "const/text", "assert/check", "test/result"],
+        "json": ["api/json_serialize", "api/request", "script/python", "script/exec"],
+        "表单": ["api/form_serialize", "api/request"],
+        "form": ["api/form_serialize", "api/request"],
+        "urlencoded": ["api/form_serialize", "api/request"],
     }
     for key, types in keyword_types.items():
         if key in haystack:
@@ -1580,6 +1594,7 @@ Do not output a final graph JSON. Build the graph step by step by calling tools.
 Use list_node_types and read_node_spec before creating unfamiliar nodes. Use only node types, ports, and properties from the catalog.
 Write tools mutate the user's actual canvas and may require confirmation. If a tool fails, inspect/read specs and repair with different parameters.
 If a user previously rejected an operation, treat it as a soft hint and avoid repeating it unless the user explicitly changed requirements.
+For HTTP/API calls, use api/request and connect its status/body/ok outputs to logs, scripts, assertions, or result nodes as needed. Use JSON/form serialization nodes for request/response conversion. Do not put network calls inside Python scripts.
 Use script/python + script/exec only when it materially simplifies complex logic: loops, repeated UI operations, combined conditions, variable calculations, or tangled graph wiring. Keep simple click/wait/OCR/assert flows as visual nodes.
 When using scripts, create script/python and script/exec, call set_node_ports on script/exec for resource inputs and bool/text/etc result outputs, then connect resources and assertions. Pass devices, template pictures, masks, OCR engines, text, numbers, and booleans through ports instead of hard-coding them.
 Script business failures should usually set_result('ok', boolean) and connect that result to assert/check and test/result. Reserve raise for unexpected errors.

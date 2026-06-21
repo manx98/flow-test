@@ -1,0 +1,41 @@
+{
+  "type": "api/form_serialize",
+  "category": "API",
+  "title": "表单序列化",
+  "description": "把对象或键值对列表序列化为 application/x-www-form-urlencoded 文本。",
+  "inputs": [
+    {
+      "name": "value",
+      "type": "any",
+      "cardinality": "1",
+      "required": false,
+      "kind": "data",
+      "desc": "要序列化的对象；未连接时读取 value 属性"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "text",
+      "type": "text",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "表单编码文本"
+    }
+  ],
+  "properties": [
+    {
+      "name": "value",
+      "type": "json",
+      "default": "{}",
+      "desc": "未连接 value 输入时使用的 JSON 对象文本"
+    },
+    {
+      "name": "doseq",
+      "type": "bool",
+      "default": true,
+      "desc": "数组值是否展开为重复 key"
+    }
+  ],
+  "order": 58
+}
