@@ -1351,6 +1351,11 @@ async function startAiBuild(message, files = [], pushUser = false) {
           addAssistantText(data.message)
         } else if (data.type === 'message') {
           addAssistantText(data.content)
+        } else if (data.type === 'delta') {
+          updateAiMessage(assistantIdx, (m) => ({ ...m, stream: (m.stream || '') + (data.text || '') }))
+        } else if (data.type === 'draft') {
+          aiDraft.value = data.draft
+          status.value = t('app.status.aiDraftReady')
         } else if (data.type === 'usage') {
           cumulativeTokens = { ...cumulativeTokens, ...(data.usage || {}) }
           updateCurrentAiTokens({ ...cumulativeTokens, estimated: false })
@@ -1624,7 +1629,7 @@ function setDynamicPorts(node, dir, rows) {
 function setAiNodePorts(args) {
   const node = resolveAiNodeRef(args.ref)
   if (!node) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: String(args.ref || '') } }
-  if (nodeTypeOf(node) !== 'script/exec') return { ok: false, error: { code: 'PORTS_NOT_EDITABLE', message: nodeTypeOf(node) } }
+  if (!['script/exec', 'script/js_exec'].includes(nodeTypeOf(node))) return { ok: false, error: { code: 'PORTS_NOT_EDITABLE', message: nodeTypeOf(node) } }
   if (Object.prototype.hasOwnProperty.call(args || {}, 'inputs')) {
     const inputs = normalizeAiPortRows(args.inputs)
     if (!inputs.ok) return inputs
@@ -1769,6 +1774,9 @@ async function requestAiDraft(message, files = [], pushUser = false) {
         status.value = t('app.status.aiDraftReady')
       } else if (event === 'error') {
         appendAssistantLine(assistantIdx, tr('app.aiBuilder.error', { message: data.message }))
+      } else if (event === 'done') {
+        if (data.message) appendAssistantLine(assistantIdx, data.message)
+        if (data.status === 'completed') status.value = t('app.aiBuilder.completed')
       }
     })
   } catch (e) {
@@ -2070,7 +2078,7 @@ function connectByName(src, outName, dst, inName) {
 }
 
 function addDraftPorts(node, spec) {
-  if (nodeTypeOf(node) !== 'script/exec') return
+  if (!['script/exec', 'script/js_exec'].includes(nodeTypeOf(node))) return
   const addOne = (dir, port) => {
     const name = String(port?.name || '').trim()
     const type = String(port?.type || '').trim()

@@ -1,0 +1,67 @@
+{
+  "type": "script/js",
+  "category": "脚本",
+  "title": "JS 脚本",
+  "description": "脚本定义（不自己执行）：在节点内写 JavaScript，输出 script 句柄，连到「JS 执行」运行。Go 版使用 goja 执行；当前 Python 运行器仅作为迁移契约展示。",
+  "functions": [
+    {
+      "sig": "设备.findImage(name, options)",
+      "desc": "找图：返回 {ok, point, rect, score}；资源应通过图节点或入参传入"
+    },
+    {
+      "sig": "设备.findText(text, options)",
+      "desc": "找文字：返回 {ok, point, rect, text, score}"
+    },
+    {
+      "sig": "设备.click(point, options)",
+      "desc": "点击坐标点"
+    },
+    {
+      "sig": "设备.type(text)",
+      "desc": "输入文本"
+    },
+    {
+      "sig": "设备.hotkey(keys)",
+      "desc": "发送快捷键，如 ctrl+c"
+    },
+    {
+      "sig": "设备.wait(ms)",
+      "desc": "等待毫秒数，可被 runner 中止"
+    },
+    {
+      "sig": "log(value)",
+      "desc": "写入运行日志"
+    }
+  ],
+  "injects": [
+    {
+      "name": "getArg(name, defaultValue)",
+      "desc": "取「JS 执行」上同名动态入参口的值"
+    },
+    {
+      "name": "setResult(name, value)",
+      "desc": "设置命名结果，从「JS 执行」上同名 result 输出口输出"
+    }
+  ],
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "script",
+      "type": "script",
+      "cardinality": "*",
+      "required": false,
+      "kind": "data",
+      "desc": "脚本定义句柄（连到「JS 执行」的 script 输入）"
+    }
+  ],
+  "properties": [
+    {
+      "name": "code",
+      "type": "code",
+      "default": "// const pc = getArg('pc')\n// const found = pc.findImage('button.png', { threshold: 0.85 })\n// if (found.ok) pc.click(found.point)\n// setResult('ok', found.ok)\n",
+      "desc": "JavaScript 代码（节点内编辑器）"
+    }
+  ],
+  "widget": "code",
+  "order": 38
+}

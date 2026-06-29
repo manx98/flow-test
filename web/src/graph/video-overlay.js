@@ -6,8 +6,59 @@ const SPECIAL = {
   Enter: 'enter', Backspace: 'backspace', Tab: 'tab', Escape: 'esc', Delete: 'delete',
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
   Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown',
+  ' ': 'space',
 }
 const BTN = ['left', 'middle', 'right']
+const MOVE_INTERVAL_MS = 33
+const MODIFIERS = [
+  ['ctrlKey', 'ctrl'],
+  ['altKey', 'alt'],
+  ['shiftKey', 'shift'],
+]
+
+function keyName(ev) {
+  if (ev.key === 'Control') return 'ctrl'
+  if (ev.key === 'Alt') return 'alt'
+  if (ev.key === 'Shift') return 'shift'
+  const special = SPECIAL[ev.key]
+  if (special) return special
+  if (ev.key.length === 1) return ev.key.toLowerCase()
+  return ''
+}
+
+function activeModifiers(ev, primary) {
+  return MODIFIERS
+    .filter(([prop, name]) => ev[prop] && name !== primary)
+    .map(([, name]) => name)
+}
+
+function sendKey(conn, name, down) {
+  if (name) conn.send({ t: 'key', name, down })
+}
+
+function isModifier(name) {
+  return ['ctrl', 'alt', 'shift'].includes(name)
+}
+
+function sendShortcut(conn, ev) {
+  const primary = keyName(ev)
+  if (!primary) return false
+  const mods = activeModifiers(ev, primary)
+  if (!mods.length) return false
+  for (const mod of mods) sendKey(conn, mod, true)
+  sendKey(conn, primary, true)
+  sendKey(conn, primary, false)
+  for (let i = mods.length - 1; i >= 0; i--) sendKey(conn, mods[i], false)
+  return true
+}
+
+function wheelDelta(ev) {
+  let amount = Math.abs(ev.deltaY)
+  if (ev.deltaMode === WheelEvent.DOM_DELTA_LINE) amount *= 16
+  else if (ev.deltaMode === WheelEvent.DOM_DELTA_PAGE) amount *= 240
+  const steps = Math.max(1, Math.min(6, Math.round(amount / 100)))
+  return ev.deltaY < 0 ? steps : -steps
+}
 
 // 设备分辨率宽高比（无则退回 16:9）
 function aspectOf(conn) {
@@ -131,9 +182,27 @@ export class VideoOverlay {
   }
 
   _bindInput(video, conn) {
+    let moveTimer = 0
+    let pendingMove = null
+    let lastMoveAt = 0
+    let lastMove = null
+    const flushMove = () => {
+      moveTimer = 0
+      if (!pendingMove) return
+      if (!lastMove || pendingMove.x !== lastMove.x || pendingMove.y !== lastMove.y) {
+        conn.send({ t: 'move', ...pendingMove })
+        lastMove = pendingMove
+        lastMoveAt = Date.now()
+      }
+      pendingMove = null
+    }
+    const sendMove = (pos) => {
+      pendingMove = pos
+      if (moveTimer) return
+      moveTimer = window.setTimeout(flushMove, Math.max(0, MOVE_INTERVAL_MS - (Date.now() - lastMoveAt)))
+    }
     video.addEventListener('mousemove', (ev) => {
-      const { x, y } = this._devCoords(video, conn, ev)
-      conn.send({ t: 'move', x, y })
+      sendMove(this._devCoords(video, conn, ev))
     })
     video.addEventListener('mousedown', (ev) => {
       ev.preventDefault(); video.focus()
@@ -148,12 +217,22 @@ export class VideoOverlay {
     video.addEventListener('wheel', (ev) => {
       ev.preventDefault()
       const { x, y } = this._devCoords(video, conn, ev)
-      conn.send({ t: 'scroll', x, y, dy: ev.deltaY < 0 ? 1 : -1 })
+      conn.send({ t: 'scroll', x, y, dy: wheelDelta(ev) })
     }, { passive: false })
     video.addEventListener('keydown', (ev) => {
-      const name = SPECIAL[ev.key]
-      if (name) { conn.send({ t: 'key', name, down: true }); conn.send({ t: 'key', name, down: false }); ev.preventDefault() }
-      else if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey) { conn.send({ t: 'text', text: ev.key }); ev.preventDefault() }
+      if (ev.metaKey) return
+      const name = keyName(ev)
+      if (isModifier(name)) { sendKey(conn, name, true); ev.preventDefault(); return }
+      if (sendShortcut(conn, ev)) { ev.preventDefault(); return }
+      if (name && SPECIAL[ev.key]) { sendKey(conn, name, true); sendKey(conn, name, false); ev.preventDefault() }
+      else if (ev.key.length === 1) { conn.send({ t: 'text', text: ev.key }); ev.preventDefault() }
+    })
+    video.addEventListener('keyup', (ev) => {
+      const name = keyName(ev)
+      if (isModifier(name)) {
+        sendKey(conn, name, false)
+        ev.preventDefault()
+      }
     })
   }
 }

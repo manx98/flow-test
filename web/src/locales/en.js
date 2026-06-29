@@ -242,6 +242,8 @@ export default {
       'var/get': 'Get Variable',
       'script/python': 'Python Script',
       'script/exec': 'Python Execute',
+      'script/js': 'JS Script',
+      'script/js_exec': 'JS Execute',
       'util/log': 'Log',
       'util/alert': 'Alert',
     },

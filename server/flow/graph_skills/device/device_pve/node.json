@@ -66,6 +66,12 @@
       "type": "bool",
       "default": false,
       "desc": "是否校验 TLS 证书"
+    },
+    {
+      "name": "swap_red_blue",
+      "type": "bool",
+      "default": false,
+      "desc": "颜色红蓝反转时开启"
     }
   ],
   "order": 3

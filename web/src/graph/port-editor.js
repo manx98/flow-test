@@ -13,6 +13,9 @@ export const EDIT_CONFIG = {
   'script/exec': { title: 'Python 执行', module: [], sections: [
     { label: '入参', dir: 'in', match: (p) => p.type !== 'exec' && p.name !== 'script', types: VAR_TYPES },
     { label: 'result', dir: 'out', match: (p) => p.type !== 'exec', types: VAR_TYPES }] },
+  'script/js_exec': { title: 'JS 执行', module: [], sections: [
+    { label: '入参', dir: 'in', match: (p) => p.type !== 'exec' && p.name !== 'script', types: VAR_TYPES },
+    { label: 'result', dir: 'out', match: (p) => p.type !== 'exec', types: VAR_TYPES }] },
 }
 
 export const EDITABLE_TYPES = new Set(Object.keys(EDIT_CONFIG))

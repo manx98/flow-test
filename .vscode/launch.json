@@ -5,13 +5,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Server: FastAPI dev (uvicorn reload)",
+            "name": "Launch Go Backend",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/flow-test",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "FLOW_REPO_ROOT": "${workspaceFolder}",
+                "FLOW_RDP_MEMLOG": "1",
+                "FLOW_RDP_TRIM_AFTER_CLOSE": "1",
+                "MALLOC_ARENA_MAX": "2"
+            }
+        },
+        {
+            "name": "Legacy Python: FastAPI dev (uvicorn reload)",
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",
             "module": "uvicorn",
             "args": [
-                "server.app:app",
+                "old.server.app:app",
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -22,13 +36,13 @@
             "subProcess": true
         },
         {
-            "name": "Server: FastAPI debug (no reload, RDP)",
+            "name": "Legacy Python: FastAPI debug (no reload, RDP)",
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",
             "module": "uvicorn",
             "args": [
-                "server.app:app",
+                "old.server.app:app",
                 "--host",
                 "127.0.0.1",
                 "--port",

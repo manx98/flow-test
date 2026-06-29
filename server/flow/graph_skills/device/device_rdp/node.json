@@ -2,7 +2,7 @@
   "type": "device/rdp",
   "category": "设备",
   "title": "RDP/xrdp 设备",
-  "description": "通过 RDP 协议连接 Windows/xrdp 远程桌面作为被测设备。依赖 aardwolf。",
+  "description": "通过 RDP 协议连接 Windows/xrdp 远程桌面作为被测设备。Linux 依赖 FreeRDP 2 cgo。",
   "inputs": [],
   "outputs": [
     {
@@ -49,11 +49,12 @@
       "name": "auth",
       "type": "enum",
       "default": "auto",
-      "desc": "认证方式：auto 自动 / tls / nla",
+      "desc": "认证方式：auto 自动重试 / nla / tls / rdp",
       "options": [
         "auto",
+        "nla",
         "tls",
-        "nla"
+        "rdp"
       ]
     },
     {

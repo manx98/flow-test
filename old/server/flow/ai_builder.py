@@ -1331,7 +1331,7 @@ class _GraphPatchCompiler:
         ports = _normalize_patch_ports(raw_ports)
         if not ports:
             return []
-        if ntype != "script/exec":
+        if ntype not in {"script/exec", "script/js_exec"}:
             raise AIBuilderError(tr(
                 self.lang, "ai_builder.bad_graph_patch",
                 "模型生成了无效流程：{value}", value=f"{ntype} cannot declare dynamic ports"))
@@ -1363,7 +1363,7 @@ class _GraphPatchCompiler:
 
     def _effective_spec_for_node(self, node: dict) -> dict:
         spec = self.catalog[node["type"]]
-        if node["type"] != "script/exec":
+        if node["type"] not in {"script/exec", "script/js_exec"}:
             return spec
         merged = dict(spec)
         merged["inputs"] = [*(spec.get("inputs") or []), *(node.get("inputs") or [])]
@@ -1374,7 +1374,7 @@ class _GraphPatchCompiler:
         spec = self.catalog.get(node.get("type"))
         if not spec:
             return None
-        if node.get("type") != "script/exec":
+        if node.get("type") not in {"script/exec", "script/js_exec"}:
             return spec
         merged = dict(spec)
         static_inputs = {p.get("name") for p in spec.get("inputs") or []}

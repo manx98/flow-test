@@ -2,7 +2,7 @@
 import { LiteGraph } from 'litegraph.js'
 import { api } from '../api.js'
 import { attachCompletion } from './code-complete.js'
-import { highlightPython } from './code-highlight.js'
+import { highlightJavaScript, highlightPython } from './code-highlight.js'
 
 const LH = 1.4          // 行高（pre 与 textarea 必须一致才能对齐）
 const RESIZE_PAD = 12   // 底部留白(节点单位)，露出 LiteGraph 右下角原生缩放手柄
@@ -55,7 +55,7 @@ export class CodeOverlay {
     })
 
     const sync = () => {
-      pre.innerHTML = highlightPython(ta.value)
+      pre.innerHTML = highlightCode(node, ta.value)
       pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft
     }
     const commit = () => {
@@ -98,9 +98,11 @@ export class CodeOverlay {
       node.setDirtyCanvas && node.setDirtyCanvas(true, true)   // 触发重绘以更新错误条位置
     }
     const scheduleCheck = () => { clearTimeout(checkTimer); hideTip(); checkTimer = setTimeout(runCheck, 500) }
-    ta.addEventListener('input', scheduleCheck)
-    ta.addEventListener('blur', () => { clearTimeout(checkTimer); runCheck() })
-    runCheck()                                        // 挂载即查一次（打开工程时坏脚本立刻显形）
+    if (node._spec?.type === 'script/python' || node._spec?.type === 'script/js') {
+      ta.addEventListener('input', scheduleCheck)
+      ta.addEventListener('blur', () => { clearTimeout(checkTimer); runCheck() })
+      runCheck()                                      // 挂载即查一次（打开工程时坏脚本立刻显形）
+    }
 
     // 悬停错误行 → 显示消息 tooltip
     const onMove = (ev) => {
@@ -167,7 +169,7 @@ export class CodeOverlay {
       if (!nodes.includes(node)) this.remove(node)
     }
     for (const node of nodes) {
-      if (node._spec?.type === 'script/python') this._place(node, this.ensure(node))
+      if (node._spec?.type === 'script/python' || node._spec?.type === 'script/js') this._place(node, this.ensure(node))
     }
   }
 
@@ -200,7 +202,7 @@ export class CodeOverlay {
     const code = node.properties?.code ?? ''
     if (document.activeElement !== e.ta && e.ta.value !== code) {
       e.ta.value = code
-      e.pre.innerHTML = highlightPython(code)
+      e.pre.innerHTML = highlightCode(node, code)
     }
     // 语法错误标注：仅高亮出错的「列范围」(err.col..end_col)，跟随字号缩放与 textarea 滚动；
     // box 已 overflow:hidden 自动裁切。跨行错误则标到该行末尾(整条编辑器宽)。
@@ -222,4 +224,8 @@ export class CodeOverlay {
       e.strip.style.display = 'none'
     }
   }
+}
+
+function highlightCode(node, code) {
+  return node._spec?.type === 'script/js' ? highlightJavaScript(code) : highlightPython(code)
 }

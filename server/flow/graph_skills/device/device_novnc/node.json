@@ -26,6 +26,12 @@
       "type": "password",
       "default": "",
       "desc": "VNC 连接密码（可空）"
+    },
+    {
+      "name": "swap_red_blue",
+      "type": "bool",
+      "default": false,
+      "desc": "颜色红蓝反转时开启"
     }
   ],
   "order": 1

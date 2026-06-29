@@ -76,6 +76,7 @@ export const api = {
   clearResults: (name) => req(`/api/projects/${name}/results`, { method: 'DELETE', headers: langHeaders() }),
   // 设备 + WebRTC
   connectDevice: (kind, config, project, node_id) => req('/api/devices/connect', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ kind, config, project, node_id }) }),
+  deviceInput: (sid, event) => req(`/api/devices/${encodeURIComponent(sid)}/input`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(event) }),
   disconnectDevice: (sid) => req(`/api/devices/${sid}/disconnect`, { method: 'POST', headers: langHeaders() }),
   webrtcOffer: (session_id, sdp, type) => req('/api/webrtc/offer', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ session_id, sdp, type }) }),
 }

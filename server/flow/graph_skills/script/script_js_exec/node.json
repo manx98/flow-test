@@ -1,0 +1,36 @@
+{
+  "type": "script/js_exec",
+  "category": "脚本",
+  "title": "JS 执行",
+  "description": "执行一个「JS 脚本」定义：script 接脚本句柄。用动态入参传入资源，脚本里用 getArg('名') 读取；用动态 result 输出业务结果，脚本里用 setResult('名', 值) 写出。Go 版使用 goja 执行；当前 Python 运行器仅作为迁移契约展示。",
+  "inputs": [
+    {
+      "name": "in",
+      "type": "exec",
+      "cardinality": "1",
+      "required": true,
+      "kind": "exec",
+      "desc": "执行入口：上游执行流到达即运行本节点"
+    },
+    {
+      "name": "script",
+      "type": "script",
+      "cardinality": "1",
+      "required": true,
+      "kind": "data",
+      "desc": "脚本定义句柄（来自「JS 脚本」节点）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "type": "exec",
+      "cardinality": "1",
+      "required": false,
+      "kind": "exec",
+      "desc": "执行出口：本节点完成后从这里继续"
+    }
+  ],
+  "properties": [],
+  "order": 39
+}
