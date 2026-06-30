@@ -19,7 +19,6 @@ func saveNodeShot(p interface {
 	draw.Draw(out, out.Bounds(), img, img.Bounds().Min, draw.Src)
 	for _, rect := range rects {
 		drawRect(out, rect, color.RGBA{R: 255, A: 255})
-		drawCross(out, rect, color.RGBA{R: 255, A: 255})
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, out); err != nil {
@@ -44,20 +43,5 @@ func drawRect(img *image.RGBA, rect image.Rectangle, c color.RGBA) {
 	for y := rect.Min.Y; y < rect.Max.Y; y++ {
 		img.SetRGBA(rect.Min.X, y, c)
 		img.SetRGBA(rect.Max.X-1, y, c)
-	}
-}
-
-func drawCross(img *image.RGBA, rect image.Rectangle, c color.RGBA) {
-	rect = rect.Intersect(img.Bounds())
-	if rect.Empty() {
-		return
-	}
-	cx := (rect.Min.X + rect.Max.X) / 2
-	cy := (rect.Min.Y + rect.Max.Y) / 2
-	for x := rect.Min.X; x < rect.Max.X; x++ {
-		img.SetRGBA(x, cy, c)
-	}
-	for y := rect.Min.Y; y < rect.Max.Y; y++ {
-		img.SetRGBA(cx, y, c)
 	}
 }
