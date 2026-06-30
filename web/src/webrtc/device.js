@@ -17,6 +17,9 @@ export class DeviceConnection {
     this._captureObjectURL = ''
     this._lastFrameBlob = null
     this._streamPromise = null
+    this.onDisconnect = null
+    this._closed = false
+    this._disconnectNotified = false
   }
 
   // 人机交互节点登记/注销一个 <video> 显示面；共享同一设备连接。
@@ -81,6 +84,8 @@ export class DeviceConnection {
     this.captureUrl = dev.capture_url || ''
     this.inputUrl = dev.input_url || ''
     if (dev.stream_mode === 'capture') this.mode = 'capture'
+    this._closed = false
+    this._disconnectNotified = false
     return dev
   }
 
@@ -101,12 +106,23 @@ export class DeviceConnection {
   async _startWebRTC() {
     const pc = new RTCPeerConnection()
     this.pc = pc
+    pc.onconnectionstatechange = () => {
+      if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) this._markDisconnected()
+    }
+    pc.oniceconnectionstatechange = () => {
+      if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) this._markDisconnected()
+    }
     pc.addTransceiver('video', { direction: 'recvonly' })
     this.dc = pc.createDataChannel('input')
     this.dc.binaryType = 'arraybuffer'
     this.dc.onmessage = (e) => this._handleDataFrame(e.data)
+    this.dc.onclose = () => this._markDisconnected()
     pc.ontrack = (e) => {
       this.stream = e.streams[0]
+      for (const track of this.stream.getTracks?.() || []) {
+        track.onended = () => this._markDisconnected()
+        track.onmute = () => this._markDisconnected()
+      }
       for (const el of this._videos) {
         el.srcObject = this.stream
         el.play?.().catch(() => {})
@@ -159,6 +175,7 @@ export class DeviceConnection {
   }
 
   async close() {
+    this._closed = true
     for (const el of this._videos) {
       try { el.srcObject = null } catch (_) {}
       el.style.backgroundImage = ''
@@ -189,20 +206,34 @@ export class DeviceConnection {
     if (this.mode === 'webrtc-data') this.mode = 'webrtc'
   }
 
+  _markDisconnected() {
+    if (this._closed || this._disconnectNotified) return
+    this._disconnectNotified = true
+    for (const el of this._videos) {
+      try { el.srcObject = null } catch (_) {}
+      el.style.backgroundImage = ''
+    }
+    if (this._captureObjectURL) URL.revokeObjectURL(this._captureObjectURL)
+    this._captureObjectURL = ''
+    this._lastFrameBlob = null
+    this._stopStream()
+    this.onDisconnect?.()
+  }
+
   _startCaptureLoop() {
     if (!this.captureUrl || this._captureTimer) return
     const tick = async () => {
       if (!this.captureUrl || this._videos.size === 0) return
       try {
         const r = await fetch(`${this.captureUrl}?t=${Date.now()}`, { cache: 'no-store' })
-        if (!r.ok) return
+        if (!r.ok) { this._markDisconnected(); return }
         const blob = await r.blob()
         const nextURL = URL.createObjectURL(blob)
         const prevURL = this._captureObjectURL
         this._captureObjectURL = nextURL
         for (const el of this._videos) el.style.backgroundImage = `url("${nextURL}")`
         if (prevURL) URL.revokeObjectURL(prevURL)
-      } catch (_) {}
+      } catch (_) { this._markDisconnected() }
     }
     tick()
     this._captureTimer = setInterval(tick, 500)

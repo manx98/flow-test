@@ -2521,6 +2521,12 @@ async function onDeviceAction(node) {
   }
   const kind = node._spec.type.split('/')[1] // device/local -> local
   const conn = new DeviceConnection()
+  conn.onDisconnect = () => {
+    if (node._conn !== conn) return
+    node.setDeviceConnectionState ? node.setDeviceConnectionState({ conn: null, connecting: false }) : (node._conn = null)
+    reconcileInteractions()
+    status.value = t('app.status.disconnected')
+  }
   const config = { ...node.properties }
   if (kind === 'rdp') {
     config.connect_timeout = timeoutSettings.value.rdp_connect_timeout

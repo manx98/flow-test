@@ -36,24 +36,35 @@ func TestVNCDeviceNoAuthCaptureAndInput(t *testing.T) {
 		rfb.read(20)
 		rfb.read(10)
 		rfb.write(framebufferUpdate(2, 2, []byte{
-			0, 255, 0, 0, 0, 0, 255, 0,
-			0, 0, 0, 255, 0, 255, 255, 255,
+			0, 0, 255, 0, 0, 255, 0, 0,
+			255, 0, 0, 0, 255, 255, 255, 0,
 		}))
 		rfb.read(10)
 		rfb.write(framebufferUpdate(2, 2, []byte{
-			0, 255, 0, 0, 0, 0, 255, 0,
-			0, 0, 0, 255, 0, 255, 255, 255,
+			0, 0, 255, 0, 0, 255, 0, 0,
+			255, 0, 0, 0, 255, 255, 255, 0,
 		}))
-		for i := 0; i < 5; i++ {
-			msg := rfb.read(1)
+		for i := 0; i < 8; i++ {
 			mu.Lock()
-			events = append(events, msg[0])
+			done := len(events) >= 5
 			mu.Unlock()
+			if done {
+				return
+			}
+			msg := rfb.read(1)
 			switch msg[0] {
+			case 3:
+				rfb.read(9)
 			case 4:
 				rfb.read(7)
+				mu.Lock()
+				events = append(events, msg[0])
+				mu.Unlock()
 			case 5:
 				rfb.read(5)
+				mu.Lock()
+				events = append(events, msg[0])
+				mu.Unlock()
 			default:
 				return
 			}
@@ -103,6 +114,89 @@ func TestVNCDeviceNoAuthCaptureAndInput(t *testing.T) {
 	defer mu.Unlock()
 	if len(events) < 5 || events[0] != 5 || events[3] != 4 {
 		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestVNCDeviceListenExitsWhenServerCloses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
+		if err != nil {
+			t.Errorf("Upgrade() error = %v", err)
+			return
+		}
+		defer conn.Close()
+		rfb := &testRFBConn{conn: conn}
+		rfb.write([]byte("RFB 003.008\n"))
+		rfb.read(12)
+		rfb.write([]byte{1, 1})
+		rfb.read(1)
+		rfb.read(1)
+		rfb.write(serverInit(2, 2))
+		rfb.read(8)
+		rfb.read(20)
+		rfb.read(20)
+		rfb.read(10)
+		rfb.write(framebufferUpdate(2, 2, []byte{
+			0, 0, 255, 0, 0, 255, 0, 0,
+			255, 0, 0, 0, 255, 255, 255, 0,
+		}))
+	}))
+	defer server.Close()
+
+	url := "ws" + server.URL[len("http"):]
+	dev, err := NewVNCDevice(map[string]any{"url": url, "connect_timeout": 2, "first_update_timeout": 2})
+	if err != nil {
+		t.Fatalf("NewVNCDevice() error = %v", err)
+	}
+	defer dev.Close()
+
+	select {
+	case <-dev.done:
+	case <-time.After(time.Second):
+		t.Fatal("listen did not exit after VNC connection closed")
+	}
+}
+
+func TestVNCDeviceCloseCancelsListen(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
+		if err != nil {
+			t.Errorf("Upgrade() error = %v", err)
+			return
+		}
+		defer conn.Close()
+		rfb := &testRFBConn{conn: conn}
+		rfb.write([]byte("RFB 003.008\n"))
+		rfb.read(12)
+		rfb.write([]byte{1, 1})
+		rfb.read(1)
+		rfb.read(1)
+		rfb.write(serverInit(2, 2))
+		rfb.read(8)
+		rfb.read(20)
+		rfb.read(20)
+		rfb.read(10)
+		rfb.write(framebufferUpdate(2, 2, []byte{
+			0, 0, 255, 0, 0, 255, 0, 0,
+			255, 0, 0, 0, 255, 255, 255, 0,
+		}))
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	url := "ws" + server.URL[len("http"):]
+	dev, err := NewVNCDevice(map[string]any{"url": url, "connect_timeout": 2, "first_update_timeout": 2})
+	if err != nil {
+		t.Fatalf("NewVNCDevice() error = %v", err)
+	}
+	if err := dev.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	select {
+	case <-dev.done:
+	case <-time.After(time.Second):
+		t.Fatal("listen did not exit after Close")
 	}
 }
 

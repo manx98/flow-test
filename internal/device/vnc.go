@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"image"
-	"image/color"
 	"io"
 	"net"
 	"net/http"
@@ -26,6 +25,9 @@ type VNCDevice struct {
 	raw    net.Conn
 	events chan vnc.ServerMessage
 	ready  chan struct{}
+	done   chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu     sync.Mutex
 	opMu   sync.Mutex
@@ -56,11 +58,15 @@ func NewVNCDevice(config map[string]any) (*VNCDevice, error) {
 		_ = raw.Close()
 		return nil, err
 	}
+	listenCtx, listenCancel := context.WithCancel(context.Background())
 	dev := &VNCDevice{
 		conn:   conn,
 		raw:    raw,
 		events: events,
 		ready:  make(chan struct{}, 1),
+		done:   make(chan struct{}),
+		ctx:    listenCtx,
+		cancel: listenCancel,
 		width:  int(conn.FramebufferWidth()),
 		height: int(conn.FramebufferHeight()),
 	}
@@ -87,12 +93,9 @@ func NewVNCDevice(config map[string]any) (*VNCDevice, error) {
 }
 
 func (d *VNCDevice) Capture(ctx context.Context, dst **image.RGBA) error {
-	if err := d.requestUpdate(true); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	_ = d.waitForFrame(waitCtx, 2*time.Second)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.img == nil {
@@ -226,6 +229,9 @@ func (d *VNCDevice) Close() error {
 		return nil
 	}
 	d.closed = true
+	if d.cancel != nil {
+		d.cancel()
+	}
 	if d.conn != nil {
 		return d.conn.Close()
 	}
@@ -237,14 +243,25 @@ func (d *VNCDevice) Close() error {
 
 func (d *VNCDevice) listen() {
 	go func() {
+		defer d.cancel()
 		_ = d.conn.ListenAndHandle()
 	}()
-	for msg := range d.events {
-		if update, ok := msg.(*vnc.FramebufferUpdate); ok {
-			d.applyFramebufferUpdate(update)
-			select {
-			case d.ready <- struct{}{}:
-			default:
+	defer close(d.done)
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case msg := <-d.events:
+			if update, ok := msg.(*vnc.FramebufferUpdate); ok {
+				d.applyFramebufferUpdate(update)
+				select {
+				case d.ready <- struct{}{}:
+				default:
+				}
+				if err := d.requestUpdate(true); err != nil {
+					d.cancel()
+					return
+				}
 			}
 		}
 	}
@@ -258,21 +275,76 @@ func (d *VNCDevice) applyFramebufferUpdate(update *vnc.FramebufferUpdate) {
 		if !ok {
 			continue
 		}
-		for y := 0; y < int(rect.Height); y++ {
-			for x := 0; x < int(rect.Width); x++ {
-				idx := y*int(rect.Width) + x
-				if idx >= len(raw.Colors) {
-					continue
-				}
-				c := raw.Colors[idx]
-				d.img.SetRGBA(int(rect.X)+x, int(rect.Y)+y, imageColor(c.R, c.G, c.B))
-			}
+		d.applyRawFramebufferRect(rect, raw)
+	}
+}
+
+func (d *VNCDevice) applyRawFramebufferRect(rect vnc.Rectangle, raw *vnc.RawEncoding) {
+	if raw.BPP == 4 && len(raw.Bytes) > 0 {
+		d.applyRawFramebufferBytes(rect, raw.Bytes)
+		return
+	}
+	d.applyRawFramebufferColors(rect, raw.Colors)
+}
+
+func (d *VNCDevice) applyRawFramebufferBytes(rect vnc.Rectangle, pixels []byte) {
+	x0, y0 := int(rect.X), int(rect.Y)
+	w, h := int(rect.Width), int(rect.Height)
+	if x0 >= d.width || y0 >= d.height {
+		return
+	}
+	if x0+w > d.width {
+		w = d.width - x0
+	}
+	for y := 0; y < h && y0+y < d.height; y++ {
+		src := y * int(rect.Width) * 4
+		if src >= len(pixels) {
+			return
+		}
+		rowW := w
+		if src+rowW*4 > len(pixels) {
+			rowW = (len(pixels) - src) / 4
+		}
+		dst := d.img.PixOffset(x0, y0+y)
+		for x := 0; x < rowW; x++ {
+			s := src + x*4
+			i := dst + x*4
+			d.img.Pix[i] = pixels[s+2]
+			d.img.Pix[i+1] = pixels[s+1]
+			d.img.Pix[i+2] = pixels[s]
+			d.img.Pix[i+3] = 255
 		}
 	}
 }
 
-func imageColor(r, g, b uint16) color.RGBA {
-	return color.RGBA{R: vncColor8(r), G: vncColor8(g), B: vncColor8(b), A: 255}
+func (d *VNCDevice) applyRawFramebufferColors(rect vnc.Rectangle, colors []vnc.Color) {
+	x0, y0 := int(rect.X), int(rect.Y)
+	w, h := int(rect.Width), int(rect.Height)
+	if x0 >= d.width || y0 >= d.height {
+		return
+	}
+	if x0+w > d.width {
+		w = d.width - x0
+	}
+	for y := 0; y < h && y0+y < d.height; y++ {
+		src := y * int(rect.Width)
+		if src >= len(colors) {
+			return
+		}
+		rowW := w
+		if src+rowW > len(colors) {
+			rowW = len(colors) - src
+		}
+		dst := d.img.PixOffset(x0, y0+y)
+		for x := 0; x < rowW; x++ {
+			c := colors[src+x]
+			i := dst + x*4
+			d.img.Pix[i] = vncColor8(c.R)
+			d.img.Pix[i+1] = vncColor8(c.G)
+			d.img.Pix[i+2] = vncColor8(c.B)
+			d.img.Pix[i+3] = 255
+		}
+	}
 }
 
 func vncColor8(v uint16) uint8 {

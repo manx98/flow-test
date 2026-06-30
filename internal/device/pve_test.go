@@ -128,12 +128,12 @@ func serveTestRFBWebSocket(t *testing.T, w http.ResponseWriter, r *http.Request)
 	rfb.read(20)
 	rfb.read(10)
 	rfb.write(framebufferUpdate(2, 2, []byte{
-		0, 255, 0, 0, 0, 0, 255, 0,
-		0, 0, 0, 255, 0, 255, 255, 255,
+		0, 0, 255, 0, 0, 255, 0, 0,
+		255, 0, 0, 0, 255, 255, 255, 0,
 	}))
 	rfb.read(10)
 	rfb.write(framebufferUpdate(2, 2, []byte{
-		0, 255, 0, 0, 0, 0, 255, 0,
-		0, 0, 0, 255, 0, 255, 255, 255,
+		0, 0, 255, 0, 0, 255, 0, 0,
+		255, 0, 0, 0, 255, 255, 255, 0,
 	}))
 }
