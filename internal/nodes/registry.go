@@ -69,8 +69,6 @@ func NewRegistry() *Registry {
 	r.Register("util/log", Log{})
 	r.Register("util/alert", Alert{})
 	r.Register("data/text_display", TextDisplay{})
-	r.Register("script/python", Legacy{Message: "Python script nodes are legacy in the Go runtime. Use script/js."})
-	r.Register("script/exec", Legacy{Message: "Python exec nodes are legacy in the Go runtime. Use script/js_exec."})
 	return r
 }
 
@@ -1121,18 +1119,6 @@ func (JSExec) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) (st
 		rc.Runner.Sink.Emit(flow.Event{Type: "alert", ID: node.ID, Level: "log", Message: line})
 	}
 	return "out", nil
-}
-
-type Legacy struct {
-	Message string
-}
-
-func (h Legacy) Eval(context.Context, *flow.RunContext, *flow.Node) (map[string]any, error) {
-	return nil, fmt.Errorf("%s", h.Message)
-}
-
-func (h Legacy) Run(context.Context, *flow.RunContext, *flow.Node) (string, error) {
-	return "", fmt.Errorf("%s", h.Message)
 }
 
 func numberProp(node *flow.Node, name string, fallback int) int {

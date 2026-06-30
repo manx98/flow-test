@@ -2,7 +2,7 @@
   "type": "script/js",
   "category": "脚本",
   "title": "JS 脚本",
-  "description": "脚本定义（不自己执行）：在节点内写 JavaScript，输出 script 句柄，连到「JS 执行」运行。Go 版使用 goja 执行；当前 Python 运行器仅作为迁移契约展示。",
+  "description": "脚本定义（不自己执行）：在节点内写 JavaScript，输出 script 句柄，连到「JS 执行」运行。Go 版使用 goja 执行。",
   "functions": [
     {
       "sig": "设备.findImage(name, options)",

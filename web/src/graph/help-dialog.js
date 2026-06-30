@@ -128,7 +128,7 @@ export function showNodeHelp(spec, colors) {
     panel.appendChild(d)
   }
 
-  // 对应脚本函数：在「Python 脚本」节点里等价调用此组件
+  // 对应脚本函数：在脚本节点里等价调用此组件
   if (spec.script) {
     const row = document.createElement('div')
     Object.assign(row.style, {
@@ -137,7 +137,7 @@ export function showNodeHelp(spec, colors) {
       border: '1px solid rgba(120,180,255,0.25)', borderRadius: '6px',
     })
     const lbl = document.createElement('span')
-    lbl.textContent = '🐍 ' + t('graph.help.scriptFunction')
+    lbl.textContent = t('graph.help.scriptFunction')
     Object.assign(lbl.style, { color: '#9fd0ff', flex: '0 0 auto', fontSize: '11px' })
     const code = document.createElement('code')
     code.textContent = spec.script
@@ -160,7 +160,7 @@ export function showNodeHelp(spec, colors) {
     panel.appendChild(row)
   }
 
-  // 注入对象 + 内置函数（目前仅 Python 脚本节点带这些字段）
+  // 注入对象 + 内置函数
   if (spec.injects && spec.injects.length) {
     panel.appendChild(section(t('graph.help.injects')))
     const { table, tbody } = makeTable([t('graph.help.name'), t('graph.help.description')])

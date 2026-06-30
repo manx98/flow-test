@@ -128,7 +128,7 @@ func validatePortList(nodeID, nodeType, dir string, ports []draftPort) error {
 		if isDynamicScriptPort(nodeType, dir, name) && !allowedDynamicPortTypes[typ] {
 			return fmt.Errorf("%s %s dynamic %s port %s has unsupported type %s", nodeType, nodeID, dir, name, typ)
 		}
-		if nodeType != "script/js_exec" && nodeType != "script/exec" && isUnknownDynamicPort(nodeType, dir, name) {
+		if nodeType != "script/js_exec" && isUnknownDynamicPort(nodeType, dir, name) {
 			return fmt.Errorf("%s %s cannot declare dynamic %s port %s", nodeType, nodeID, dir, name)
 		}
 	}
@@ -170,7 +170,7 @@ func defaultPorts(nodeType string, input bool) map[string]bool {
 		if !input {
 			ports["script"] = true
 		}
-	case "script/js_exec", "script/exec":
+	case "script/js_exec":
 		if input {
 			ports["in"] = true
 			ports["script"] = true
@@ -298,7 +298,7 @@ func findGraphSkillsRoot() string {
 }
 
 func isDynamicScriptPort(nodeType, dir, name string) bool {
-	if nodeType != "script/js_exec" && nodeType != "script/exec" {
+	if nodeType != "script/js_exec" {
 		return false
 	}
 	return !isFixedScriptPort(dir, name)

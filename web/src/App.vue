@@ -1629,7 +1629,7 @@ function setDynamicPorts(node, dir, rows) {
 function setAiNodePorts(args) {
   const node = resolveAiNodeRef(args.ref)
   if (!node) return { ok: false, error: { code: 'NODE_NOT_FOUND', message: String(args.ref || '') } }
-  if (!['script/exec', 'script/js_exec'].includes(nodeTypeOf(node))) return { ok: false, error: { code: 'PORTS_NOT_EDITABLE', message: nodeTypeOf(node) } }
+  if (nodeTypeOf(node) !== 'script/js_exec') return { ok: false, error: { code: 'PORTS_NOT_EDITABLE', message: nodeTypeOf(node) } }
   if (Object.prototype.hasOwnProperty.call(args || {}, 'inputs')) {
     const inputs = normalizeAiPortRows(args.inputs)
     if (!inputs.ok) return inputs
@@ -2078,7 +2078,7 @@ function connectByName(src, outName, dst, inName) {
 }
 
 function addDraftPorts(node, spec) {
-  if (!['script/exec', 'script/js_exec'].includes(nodeTypeOf(node))) return
+  if (nodeTypeOf(node) !== 'script/js_exec') return
   const addOne = (dir, port) => {
     const name = String(port?.name || '').trim()
     const type = String(port?.type || '').trim()

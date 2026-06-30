@@ -240,8 +240,6 @@ export default {
       'data/text_display': 'Text Display',
       'var/set': 'Set Variable',
       'var/get': 'Get Variable',
-      'script/python': 'Python Script',
-      'script/exec': 'Python Execute',
       'script/js': 'JS Script',
       'script/js_exec': 'JS Execute',
       'util/log': 'Log',

@@ -2,7 +2,7 @@
   "type": "script/js_exec",
   "category": "脚本",
   "title": "JS 执行",
-  "description": "执行一个「JS 脚本」定义：script 接脚本句柄。用动态入参传入资源，脚本里用 getArg('名') 读取；用动态 result 输出业务结果，脚本里用 setResult('名', 值) 写出。Go 版使用 goja 执行；当前 Python 运行器仅作为迁移契约展示。",
+  "description": "执行一个「JS 脚本」定义：script 接脚本句柄。用动态入参传入资源，脚本里用 getArg('名') 读取；用动态 result 输出业务结果，脚本里用 setResult('名', 值) 写出。Go 版使用 goja 执行。",
   "inputs": [
     {
       "name": "in",

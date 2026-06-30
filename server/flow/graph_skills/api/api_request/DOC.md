@@ -8,7 +8,7 @@
 - POST/PUT/PATCH：填写 body；headers 用 JSON 对象，例如 `{"Authorization":"Bearer token"}`。
 - 如果 body 是 JSON 且没有显式 Content-Type，节点会使用 content_type 属性作为默认 Content-Type。
 - 需要严格失败中止流程时，开启 fail_on_error；否则非 2xx/3xx 会走 fail 分支但流程不会抛异常。
-- 复杂响应判断：`body -> script/exec`，脚本里解析 JSON 后 `set_result('ok', bool)`，再接 `assert/check`。
+- 复杂响应判断：`body -> script/js_exec`，脚本里解析 JSON 后 `setResult('ok', bool)`，再接 `assert/check`。
 
 ## 注意事项
 

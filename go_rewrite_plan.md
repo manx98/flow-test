@@ -18,12 +18,12 @@
 - JS 插件允许循环执行 UI 操作，但必须支持 runner 超时、goja interrupt、abort 检查。
 - JS 插件沿用“脚本定义节点 + 执行节点 + 动态端口”结构。
 - 新节点建议为 `script/js` 与 `script/js_exec`。
-- 旧 `script/python` / `script/exec` 不兼容运行，只显示迁移提示。
+- 旧 `script/python` / `script/exec` 从当前 Go/前端节点目录移除；旧版参考保留在 `old/`。
 - 废弃 `visauto`。
 - 视觉使用 `gocv.io/x/gocv`。
 - Tesseract OCR 使用 `github.com/otiai10/gosseract/v2`。
 - PaddleOCR 节点保留站位，第一阶段不实现。
-- RDP 使用 `github.com/nakagami/grdp`，接受 GPL-3.0 许可证影响。
+- RDP 使用 FreeRDP 2 cgo 集成，依赖 `freerdp2 freerdp-client2 winpr2`。
 - VMware 使用 `github.com/vmware/govmomi` 支持 ESXi。
 - Local Device 第一阶段移除。
 - VMware ESXi 第一阶段验收必须包含截图、鼠标、键盘输入。
@@ -38,7 +38,7 @@ Go Backend
   ├─ Flow Runner
   ├─ JS Plugin Runtime (goja)
   ├─ Device Layer
-  │   ├─ RDP: nakagami/grdp
+  │   ├─ RDP: FreeRDP 2 cgo
   │   ├─ noVNC/RFB: kward/go-vnc + WebSocket net.Conn adapter
   │   ├─ PVE: PVE API -> VNC websocket -> go-vnc
   │   ├─ VMware ESXi: govmomi -> WebMKS -> go-vnc
@@ -74,7 +74,6 @@ Eino 只负责 AI Builder 编排，不负责 Flow Runner、设备控制、视觉
 
 ### Legacy 行为
 
-- `script/python` / `script/exec`：可显示，运行时报迁移提示。
 - `device/local`：可显示 legacy，运行时报不支持。
 - PaddleOCR：节点可存在，运行时报未实现。
 
@@ -177,7 +176,7 @@ Phase D
 理由：
 
 - 前端当前已经依赖这套 `node.json`。
-- Python / Go 并存期间可以共用同一份组件契约。
+- 当前 Go 版与前端共用同一份组件契约。
 - 避免两份 catalog 分叉。
 - Go 版可以在 loader 层过滤或标记不支持节点。
 - Go 版稳定后，再考虑把 `graph_skills` 移到语言无关根目录。
@@ -191,8 +190,7 @@ Go catalog loader 规则：
   - `legacy: true/false`
   - `reason`
 - 过滤 `device/local`。
-- 保留 `script/python` / `script/exec`，但标记 legacy，运行时报迁移提示。
-- 已添加 `script/js` / `script/js_exec` 节点定义。
+- 仅保留 `script/js` / `script/js_exec` 脚本节点定义。
 - PaddleOCR 节点保留但标记未实现。
 
 ## Flow Runner 设计
@@ -288,7 +286,7 @@ setResult("ok", found.ok)
 
 ```go
 type Device interface {
-    Capture(ctx context.Context) (image.Image, error)
+    Capture(ctx context.Context, dst **image.RGBA) error
     MouseMove(ctx context.Context, x, y int) error
     MouseDown(ctx context.Context, button Button, x, y int) error
     MouseUp(ctx context.Context, button Button, x, y int) error
@@ -302,16 +300,17 @@ type Device interface {
 
 ### RDP
 
-- 使用 `github.com/nakagami/grdp`。
+- 使用 FreeRDP 2 cgo。
 - 维护 framebuffer。
-- `OnBitmap` 更新 framebuffer。
+- FreeRDP GDI paint 更新 framebuffer。
 - `MouseDown/MouseMove/MouseUp/MouseWheel` 实现鼠标。
 - `KeyDown/KeyUp` 实现键盘。
 - 需要处理键盘布局、分辨率、重连、截图等待。
 - 许可证 GPL-3.0 已接受。
-- 当前实现已接入 `device/rdp`；本地 `replace ./third_party/grdp` 只用于禁用 grdp 当前 amd64 汇编路径并使用 grdp 自带 generic 路径，不自研 RDP 协议。
+- 当前实现已接入 `device/rdp`；Linux+cgo 下通过 FreeRDP 2 建立连接、拷贝 GDI framebuffer，并发送鼠标/键盘事件。
 - 已支持 `security_protocol` 配置：`auto`、`ssl`、`nla`、`rdp`。旧 xrdp 可用 `ssl` 绕过 NLA。
-- 本地 grdp TLS 配置允许 TLS 1.0-1.2，以兼容旧 xrdp。
+- 已支持 FreeRDP 安全层选择、连接超时、首帧等待和断线错误上报。
+- 已实现远程鼠标后端合成：缓存 FreeRDP pointer shape，并在截图/视频帧输出时合成 32bpp alpha cursor；cursor 位置跟随输入侧鼠标事件。
 
 ### noVNC / RFB
 
@@ -534,12 +533,12 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 ### v1 站位
 
 - `ocr/paddle`
-- `script/python`
-- `script/exec`
 
 ### v1 移除
 
 - `device/local`
+- `script/python`
+- `script/exec`
 
 ## 里程碑
 
@@ -565,7 +564,7 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 - 已添加 Gin 服务入口、project CRUD、flow/meta/images/results 基础 API。
 - 已补齐 settings API、JS 语法检查与轻量 JS 补全 API。
 - 已补齐图片上传、图片重命名、结果文件读取、单个结果删除、结果清空 API。
-- 已添加 node catalog loader，继续读取 `server/flow/graph_skills` 并过滤 `device/local`、标记 Python legacy。
+- 已添加 node catalog loader，继续读取 `server/flow/graph_skills` 并过滤 `device/local`。
 - 已补齐静态前端托管与 SPA route fallback，API/WS 未命中仍返回 JSON 404。
 - 已添加同步 run endpoint 与可执行 WebSocket run endpoint。
 - 运行结果已保存 `report.json` 与 `report.junit.xml`，REST/WS run 会返回前端可直接打开的结果链接。
@@ -587,16 +586,17 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 
 - 已添加 `internal/flow` 图模型、事件模型、最小 runner。
 - 已添加 LiteGraph `links` 数组兼容解析，按节点端口 slot 映射端口名。
-- 已添加 `internal/nodes` 基础 registry，覆盖 `flow/start`、`flow/if`、`flow/loop`、`flow/sequence`、`flow/try_catch`、`flow/raise`、常量、坐标常量、变量、delay、assert、test result、log、alert、text display、JSON/Form serialize、HTTP request、Python legacy 报错。
+- 已添加 `internal/nodes` 基础 registry，覆盖 `flow/start`、`flow/if`、`flow/loop`、`flow/sequence`、`flow/try_catch`、`flow/raise`、常量、坐标常量、变量、delay、assert、test result、log、alert、text display、JSON/Form serialize、HTTP request、JS 脚本。
 - `wait/delay` 已按现有节点契约使用 `seconds` 属性。
 - 已添加单元测试覆盖 catalog/project/runner、LiteGraph 解析、条件分支、断言、序列化和 HTTP request 基础行为。
 - 已添加异常捕获与坐标常量测试。
 - 已添加 Go 版运行报告结构，`POST /api/projects/:name/run` 会生成 `results/<run>/report.json`，并在响应中返回 `run`、`report`、`events`。
 - 报告语义已区分 assertion failure、捕获异常和未捕获节点错误；只有未捕获 runner error 进入 `errors`。
-- 已添加设备节点输出和 `device/attrs` 拆分；`device/rdp` 已通过 `github.com/nakagami/grdp` 接入，`device/novnc` 已通过 `github.com/kward/go-vnc` 接入 TCP VNC 与 noVNC WebSocket，`device/pve` 已通过 Proxmox API + VNC WebSocket 接入，`device/vmware` 已通过 govmomi + WebMKS 接入。
+- 已添加设备节点输出和 `device/attrs` 拆分；`device/rdp` 已通过 FreeRDP 2 cgo 接入，`device/novnc` 已通过 `github.com/kward/go-vnc` 接入 TCP VNC 与 noVNC WebSocket，`device/pve` 已通过 Proxmox API + VNC WebSocket 接入，`device/vmware` 已通过 govmomi + WebMKS 接入。
 - 已添加设备工厂入口与真实 `static_image` fixture device，可通过 `image` / `image_path` / `image_base64` 配置提供截图，供视觉/OCR/JS 脚本链路集成验证。
 - 已添加设备截图 API：`GET /api/devices/:session_id/capture`，真实设备 session 返回 PNG，未接入远程驱动的 session 明确返回 501。
 - 已添加 `const/image`、`vision/preview`、`mask/create` 的资源引用/透传，找图路径已接入 GoCV。
+- `vision/find_image` / `vision/find_all` 已按节点契约读取 `similarity`，保留旧 `threshold` 兼容；匹配候选会按 score 降序排序，`find_image` 返回最佳命中。
 - 已添加 `geom/to_point` 的纯计算实现，支持 match 锚点和偏移转换。
 - 已添加 `vision/find_image`、`vision/find_all` 的 GoCV 模板匹配；`vision/find_text` 已接入 gosseract/Tesseract，可直接从图片识别 text blocks，并支持普通文本、regex 和 `min_confidence` 过滤。
 - 已添加 `ocr/tesseract` gosseract 实现；`ocr/paddle` 配置引用占位，真实 Paddle 后端待 M5 接入。
@@ -631,7 +631,7 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 
 ### M4: 设备 spike
 
-- RDP grdp framebuffer + input 已接入，后续继续补键盘布局、重连和更多编码兼容。
+- RDP FreeRDP framebuffer + input 已接入，后续继续补键盘布局、重连和更多编码兼容。
 - RFB/noVNC framebuffer + input 已通过 `github.com/kward/go-vnc` 接入。
 - PVE -> VNC WebSocket -> go-vnc 已接入。
 - VMware ESXi console adapter。
@@ -640,10 +640,11 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 
 - 已定义统一 `device.Device` interface。
 - 已添加 `device.Ref`，用于在 graph value / JS runtime 中携带受控设备引用；真实设备对象通过 `json:"-"` 隐藏，不暴露给前端或脚本。
-- 设备 session 已支持填充真实 `Device`；`static_image`、RDP/grdp、VNC/go-vnc、PVE 与 VMware 连接已接入。
+- 设备 session 已支持填充真实 `Device`；`static_image`、RDP/FreeRDP、VNC/go-vnc、PVE 与 VMware 连接已接入。
 - 已接入设备 session 生命周期：`/api/devices/connect` 可创建 unsupported session 并返回尺寸，`/api/devices/:session_id/disconnect` 会删除 session。
 - Go runner 已支持按 `project + device node id` 复用 UI 连接创建的设备 session ref；没有 live session 时回退节点静态配置。
-- 当前已增加 capture-stream fallback：真实 `Device` 的 `/api/webrtc/offer` 返回 `mode: "capture"`、`capture_url` 和 `input_url`；前端定时拉 PNG 展示，并通过 `/api/devices/:session_id/input` 转发鼠标键盘事件。完整 WebRTC media bridge 仍待后续实现。
+- 当前已接入 WebRTC video bridge：真实 `Device` 可通过 `/api/webrtc/offer` 返回 `mode: "webrtc-video"` 并推送 VP8 视频轨；前端通过 DataChannel 转发鼠标键盘事件。
+- 仍保留 HTTP PNG capture fallback：当 WebRTC bridge 初始化失败时返回 `mode: "capture"`、`capture_url` 和 `input_url`。
 
 ### M5: Vision/OCR
 
@@ -693,12 +694,12 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 ## 高风险清单
 
 1. VMware ESXi 控制台链路是否可稳定拿到 framebuffer 和输入控制。
-2. grdp GPL-3.0 对发布模式的影响。
+2. FreeRDP 2 native 依赖、运行环境和许可证对发布模式的影响。
 3. GoCV / Tesseract native 依赖导致部署复杂。
 4. GoCV 匹配结果与当前 visauto 行为不一致。
 5. JS 插件死循环和设备操作超时。
 6. Eino tool calling 与现有前端 confirm/step UI 的协议映射。
-7. 旧 flow 中 Python 脚本、Local Device 的迁移体验。
+7. 旧 flow 中已移除 Python 脚本、Local Device 的迁移体验。
 8. noVNC/RFB 键盘映射和中文输入。
 9. RDP 键盘布局、H.264、重连和 framebuffer 更新一致性。
 10. AI Builder 上下文选择和 graph skills 文档裁剪重新实现后质量回退。
@@ -709,5 +710,5 @@ Go HTTP 服务使用 Gin 组织路由、中间件、静态资源和 REST API。W
 - Gin: https://gin-gonic.com/
 - GoCV: https://pkg.go.dev/gocv.io/x/gocv
 - gosseract: https://pkg.go.dev/github.com/otiai10/gosseract/v2
-- grdp: https://pkg.go.dev/github.com/nakagami/grdp
+- FreeRDP: https://www.freerdp.com/
 - govmomi: https://pkg.go.dev/github.com/vmware/govmomi

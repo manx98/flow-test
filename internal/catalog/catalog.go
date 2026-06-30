@@ -76,10 +76,6 @@ func loadNode(path string) (map[string]any, error) {
 func annotateSupport(node map[string]any) {
 	t := stringOf(node["type"])
 	switch t {
-	case "script/python", "script/exec":
-		node["supported"] = false
-		node["legacy"] = true
-		node["reason"] = "Python script nodes are legacy in the Go runtime; migrate to script/js and script/js_exec."
 	case "ocr/paddle":
 		node["supported"] = false
 		node["legacy"] = false

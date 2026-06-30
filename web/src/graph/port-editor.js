@@ -10,9 +10,6 @@ export const EDIT_CONFIG = {
     { label: '变量', dir: 'in', match: (p) => p.type !== 'exec', types: VAR_TYPES }] },
   'flow/sequence': { title: '顺序出口', module: [], sections: [
     { label: '出口', dir: 'out', match: (p) => p.type === 'exec', fixed: 'exec' }] },
-  'script/exec': { title: 'Python 执行', module: [], sections: [
-    { label: '入参', dir: 'in', match: (p) => p.type !== 'exec' && p.name !== 'script', types: VAR_TYPES },
-    { label: 'result', dir: 'out', match: (p) => p.type !== 'exec', types: VAR_TYPES }] },
   'script/js_exec': { title: 'JS 执行', module: [], sections: [
     { label: '入参', dir: 'in', match: (p) => p.type !== 'exec' && p.name !== 'script', types: VAR_TYPES },
     { label: 'result', dir: 'out', match: (p) => p.type !== 'exec', types: VAR_TYPES }] },

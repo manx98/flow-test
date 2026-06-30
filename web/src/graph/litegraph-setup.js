@@ -152,7 +152,7 @@ function registerOne(spec) {
       this._applyVarType()
     }
     // 脚本定义节点：仅嵌多行代码编辑器（入参经 get_arg 取，无设备/参数输入口）
-    if (spec.type === 'script/python' || spec.type === 'script/js') this._showCode = true
+    if (spec.type === 'script/js') this._showCode = true
     this.size = this.computeSize()
     if (this._showVideo || this._showShot) this.size[1] = Math.max(this.size[1], 220)
     if (this._showCode) { this.size[0] = Math.max(this.size[0], 300); this.size[1] = Math.max(this.size[1], 200) }

@@ -1,33 +1,21 @@
-// 代码补全：优先后端 jedi 语义补全（/api/complete），失败回退本地静态候选。
+// 代码补全：优先后端 JS 语义补全（/api/complete），失败回退本地静态候选。
 // 用法：attachCompletion(textarea, onChange) —— onChange 在补全插入后调用以同步外部状态。
 import { api } from '../api.js'
 
-// dev 是 visauto Device(也是 Region)，按源码公开方法整理
-const DEV = ['find', 'find_all', 'exists', 'wait', 'wait_vanish', 'click', 'double_click',
-  'right_click', 'hover', 'drag_drop', 'scroll', 'type', 'paste', 'press_key', 'read_text',
-  'highlight', 'center', 'rect', 'region', 'target', 'capture', 'keyboard', 'mouse',
-  'observe', 'on_appear', 'on_vanish', 'on_change', 'stop_observe', 'connect', 'close', 'backend']
-const VISAUTO = ['Device', 'Region', 'Element', 'Match', 'Image', 'ImagePath', 'Pattern', 'Key',
-  'Location', 'Rect', 'EventType', 'ObserveEvent', 'connect_local', 'connect_novnc', 'connect_rdp']
-const PATTERN = ['similar', 'grayscale', 'mask', 'target_offset']
-const DICT = ['get', 'keys', 'values', 'items', 'pop', 'update', 'setdefault', 'clear']
-
-// 脚本节点注入的「组件功能函数」（与 server/flow/engine.py ScriptAPI 一致）
+const PC = ['click', 'type', 'hotkey', 'findImage', 'findAll', 'findText', 'wait', 'log']
+const DEVICE = ['click', 'type', 'hotkey', 'capture']
 const FLOW = ['image', 'find_image', 'find_text', 'find_all', 'wait_appear', 'wait_vanish',
   'to_point', 'click', 'type_text', 'scroll', 'drag', 'delay', 'log', 'alert', 'get_var', 'set_var']
-const MEMBERS = { dev: DEV, visauto: VISAUTO, Pattern: PATTERN, vars: DICT, flow: FLOW }
-const GLOBALS = ['dev', 'visauto', 'vars', 'Pattern', 'flow', ...FLOW]
-const KEYWORDS = ['and', 'as', 'assert', 'break', 'class', 'continue', 'def', 'del', 'elif',
-  'else', 'except', 'False', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
-  'lambda', 'None', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'True', 'try', 'while',
-  'with', 'yield']
-const BUILTINS = ['print', 'len', 'range', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set',
-  'tuple', 'enumerate', 'zip', 'min', 'max', 'sum', 'abs', 'round', 'sorted', 'any', 'all',
-  'open', 'isinstance', 'repr']
-// 常见标准库模块名（后端不可用时的 import 兜底）
-const STDLIB = ['os', 'sys', 'time', 'json', 're', 'math', 'random', 'datetime', 'subprocess',
-  'pathlib', 'shutil', 'collections', 'itertools', 'functools', 'typing', 'logging', 'base64',
-  'hashlib', 'urllib', 'socket', 'threading', 'traceback', 'io', 'csv', 'string', 'uuid']
+const VARS = ['get', 'set', 'keys']
+const JSON_MEMBERS = ['parse', 'stringify']
+const MATH = ['abs', 'ceil', 'floor', 'max', 'min', 'round', 'random']
+const MEMBERS = { pc: PC, device: DEVICE, flow: FLOW, vars: VARS, JSON: JSON_MEMBERS, Math: MATH }
+const GLOBALS = ['getArg', 'setResult', 'log', 'pc', 'flow', 'vars', 'device', 'JSON', 'Math',
+  'Array', 'Object', 'String', 'Number', 'Boolean', 'Date', 'RegExp', 'Error']
+const KEYWORDS = ['break', 'case', 'catch', 'class', 'const', 'continue', 'default', 'do', 'else',
+  'false', 'finally', 'for', 'function', 'if', 'let', 'new', 'null', 'return', 'switch', 'throw',
+  'true', 'try', 'undefined', 'var', 'while']
+const BUILTINS = ['parseInt', 'parseFloat', 'isFinite', 'isNaN', 'console']
 
 const uniq = (a) => [...new Set(a)]
 const bufferWords = (t) => uniq((t.match(/[A-Za-z_]\w{1,}/g) || []))
@@ -58,10 +46,8 @@ function candidates(text, pos) {
   if (mm) {
     memberAccess = true
     pool = MEMBERS[mm[1]] || []        // 已知对象给成员，未知对象不提示
-  } else if (/^\s*(import|from)\s+[\w.]*$/.test(left.split('\n').pop())) {
-    pool = STDLIB                       // import/from 语境：提示标准库模块名
   } else {
-    pool = [...GLOBALS, ...KEYWORDS, ...BUILTINS, ...STDLIB, ...bufferWords(text)]
+    pool = [...GLOBALS, ...KEYWORDS, ...BUILTINS, ...bufferWords(text)]
   }
   if (!memberAccess && word.length < 1) return { word, list: [] }
   const list = uniq(pool).filter(w => w.startsWith(word)).sort().slice(0, 12)
@@ -118,7 +104,7 @@ export function attachCompletion(ta, onChange) {
     paint()
   }
 
-  // 先用本地基础候选即时显示（关键字/内置/全局/缓冲区词），再用后端 jedi 语义结果增强
+  // 先用本地基础候选即时显示（关键字/内置/全局/缓冲区词），再用后端语义结果增强
   const query = async () => {
     if (!shouldOpen(ta)) return close()
     curWord = currentWord(ta)
@@ -131,7 +117,7 @@ export function attachCompletion(ta, onChange) {
       const comps = await api.complete(code, line, column)
       if (seq !== reqSeq) return                 // 过期响应丢弃
       const names = comps.map(c => c.name)       // 保留精确匹配（如 import os 的 os）
-      const merged = uniq([...names, ...local])  // jedi 语义 + 本地基础
+      const merged = uniq([...names, ...local])  // 后端语义 + 本地基础
       if (useful(merged)) show(merged)
       else close()
     } catch (_) {

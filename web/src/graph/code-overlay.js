@@ -2,7 +2,7 @@
 import { LiteGraph } from 'litegraph.js'
 import { api } from '../api.js'
 import { attachCompletion } from './code-complete.js'
-import { highlightJavaScript, highlightPython } from './code-highlight.js'
+import { highlightJavaScript } from './code-highlight.js'
 
 const LH = 1.4          // 行高（pre 与 textarea 必须一致才能对齐）
 const RESIZE_PAD = 12   // 底部留白(节点单位)，露出 LiteGraph 右下角原生缩放手柄
@@ -98,7 +98,7 @@ export class CodeOverlay {
       node.setDirtyCanvas && node.setDirtyCanvas(true, true)   // 触发重绘以更新错误条位置
     }
     const scheduleCheck = () => { clearTimeout(checkTimer); hideTip(); checkTimer = setTimeout(runCheck, 500) }
-    if (node._spec?.type === 'script/python' || node._spec?.type === 'script/js') {
+    if (node._spec?.type === 'script/js') {
       ta.addEventListener('input', scheduleCheck)
       ta.addEventListener('blur', () => { clearTimeout(checkTimer); runCheck() })
       runCheck()                                      // 挂载即查一次（打开工程时坏脚本立刻显形）
@@ -169,7 +169,7 @@ export class CodeOverlay {
       if (!nodes.includes(node)) this.remove(node)
     }
     for (const node of nodes) {
-      if (node._spec?.type === 'script/python' || node._spec?.type === 'script/js') this._place(node, this.ensure(node))
+      if (node._spec?.type === 'script/js') this._place(node, this.ensure(node))
     }
   }
 
@@ -227,5 +227,5 @@ export class CodeOverlay {
 }
 
 function highlightCode(node, code) {
-  return node._spec?.type === 'script/js' ? highlightJavaScript(code) : highlightPython(code)
+  return highlightJavaScript(code)
 }
