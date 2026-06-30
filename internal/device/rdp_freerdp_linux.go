@@ -18,6 +18,7 @@ package device
 #include <freerdp/client/channels.h>
 #include <freerdp/codec/color.h>
 #include <freerdp/gdi/gdi.h>
+#include <freerdp/graphics.h>
 #include <freerdp/input.h>
 #include <freerdp/settings.h>
 #include <freerdp/update.h>
@@ -42,6 +43,18 @@ typedef struct flow_rdp_client {
 	int gdi_initialized;
 	int frame_ready;
 	int content_ready;
+	int cursor_visible;
+	UINT32 cursor_x;
+	UINT32 cursor_y;
+	UINT32 cursor_hot_x;
+	UINT32 cursor_hot_y;
+	UINT32 cursor_width;
+	UINT32 cursor_height;
+	UINT32 cursor_xor_bpp;
+	UINT32 cursor_xor_len;
+	UINT32 cursor_and_len;
+	BYTE* cursor_xor;
+	BYTE* cursor_and;
 	pBeginPaint previous_begin_paint;
 	pEndPaint previous_end_paint;
 	char error[512];
@@ -171,6 +184,108 @@ static void flow_rdp_set_last_error(flow_rdp_client* client, const char* prefix)
 		text ? text : "");
 }
 
+static void flow_rdp_free_cursor(flow_rdp_client* client) {
+	if (!client) {
+		return;
+	}
+	free(client->cursor_xor);
+	free(client->cursor_and);
+	client->cursor_xor = NULL;
+	client->cursor_and = NULL;
+	client->cursor_visible = 0;
+	client->cursor_width = 0;
+	client->cursor_height = 0;
+	client->cursor_xor_len = 0;
+	client->cursor_and_len = 0;
+}
+
+static BOOL flow_rdp_pointer_new(rdpContext* context, rdpPointer* pointer) {
+	return TRUE;
+}
+
+static void flow_rdp_pointer_free(rdpContext* context, rdpPointer* pointer) {
+}
+
+static BOOL flow_rdp_pointer_set(rdpContext* context, const rdpPointer* pointer) {
+	flow_rdp_client* client = flow_rdp_context_client(context);
+	if (!client || !pointer || !pointer->xorMaskData || pointer->width == 0 || pointer->height == 0) {
+		return TRUE;
+	}
+
+	BYTE* xor_data = NULL;
+	BYTE* and_data = NULL;
+	if (pointer->lengthXorMask > 0) {
+		xor_data = (BYTE*)malloc(pointer->lengthXorMask);
+		if (!xor_data) {
+			return FALSE;
+		}
+		memcpy(xor_data, pointer->xorMaskData, pointer->lengthXorMask);
+	}
+	if (pointer->andMaskData && pointer->lengthAndMask > 0) {
+		and_data = (BYTE*)malloc(pointer->lengthAndMask);
+		if (!and_data) {
+			free(xor_data);
+			return FALSE;
+		}
+		memcpy(and_data, pointer->andMaskData, pointer->lengthAndMask);
+	}
+
+	flow_rdp_free_cursor(client);
+	client->cursor_hot_x = pointer->xPos;
+	client->cursor_hot_y = pointer->yPos;
+	client->cursor_width = pointer->width;
+	client->cursor_height = pointer->height;
+	client->cursor_xor_bpp = pointer->xorBpp;
+	client->cursor_xor_len = pointer->lengthXorMask;
+	client->cursor_and_len = pointer->lengthAndMask;
+	client->cursor_xor = xor_data;
+	client->cursor_and = and_data;
+	client->cursor_visible = 1;
+	return TRUE;
+}
+
+static BOOL flow_rdp_pointer_set_null(rdpContext* context) {
+	flow_rdp_client* client = flow_rdp_context_client(context);
+	if (client) {
+		client->cursor_visible = 0;
+	}
+	return TRUE;
+}
+
+static BOOL flow_rdp_pointer_set_default(rdpContext* context) {
+	flow_rdp_client* client = flow_rdp_context_client(context);
+	if (client) {
+		client->cursor_visible = 0;
+	}
+	return TRUE;
+}
+
+static BOOL flow_rdp_pointer_set_position(rdpContext* context, UINT32 x, UINT32 y) {
+	flow_rdp_client* client = flow_rdp_context_client(context);
+	if (client) {
+		client->cursor_x = x;
+		client->cursor_y = y;
+	}
+	return TRUE;
+}
+
+static void flow_rdp_register_pointer(rdpContext* context) {
+	if (!context || !context->graphics) {
+		return;
+	}
+	rdpPointer* pointer = Pointer_Alloc(context);
+	if (!pointer) {
+		return;
+	}
+	pointer->New = flow_rdp_pointer_new;
+	pointer->Free = flow_rdp_pointer_free;
+	pointer->Set = flow_rdp_pointer_set;
+	pointer->SetNull = flow_rdp_pointer_set_null;
+	pointer->SetDefault = flow_rdp_pointer_set_default;
+	pointer->SetPosition = flow_rdp_pointer_set_position;
+	graphics_register_pointer(context->graphics, pointer);
+}
+
 static BOOL flow_rdp_pre_connect(freerdp* instance) {
 	rdpSettings* settings = instance->settings;
 	settings->ColorDepth = 32;
@@ -268,6 +383,7 @@ static BOOL flow_rdp_post_connect(freerdp* instance) {
 			instance->update->BeginPaint = flow_rdp_begin_paint;
 			instance->update->EndPaint = flow_rdp_end_paint;
 		}
+		flow_rdp_register_pointer(instance->context);
 		context->client->connected = 1;
 		flow_rdp_signal_ready(context->client);
 	}
@@ -299,6 +415,7 @@ static void flow_rdp_post_disconnect(freerdp* instance) {
 	if (client) {
 		client->frame_ready = 0;
 		client->content_ready = 0;
+		flow_rdp_free_cursor(client);
 	}
 }
 
@@ -333,6 +450,7 @@ static void flow_rdp_destroy_client(flow_rdp_client* client, BOOL close_thread_h
 	}
 	flow_rdp_destroy_sync(client);
 	DeleteCriticalSection(&client->lock);
+	flow_rdp_free_cursor(client);
 	free(client);
 }
 
@@ -534,6 +652,67 @@ static void flow_rdp_free(flow_rdp_client* client) {
 	flow_rdp_destroy_client(client, TRUE);
 }
 
+static int flow_rdp_cursor_and_bit(const BYTE* mask, UINT32 len, UINT32 width, UINT32 x, UINT32 y) {
+	if (!mask) {
+		return 0;
+	}
+	UINT32 stride = (width + 7) / 8;
+	UINT32 idx = y * stride + x / 8;
+	if (idx >= len) {
+		return 0;
+	}
+	return (mask[idx] & (0x80 >> (x % 8))) != 0;
+}
+
+static void flow_rdp_blend_cursor(flow_rdp_client* client, unsigned char* dst, int width, int height, int stride) {
+	if (!client || !dst || !client->cursor_visible || !client->cursor_xor || client->cursor_xor_bpp != 32 ||
+	    client->cursor_width == 0 || client->cursor_height == 0) {
+		return;
+	}
+	UINT32 src_stride = client->cursor_width * 4;
+	if (client->cursor_xor_len < src_stride * client->cursor_height) {
+		return;
+	}
+	int left = (int)client->cursor_x - (int)client->cursor_hot_x;
+	int top = (int)client->cursor_y - (int)client->cursor_hot_y;
+	for (UINT32 y = 0; y < client->cursor_height; y++) {
+		int dy = top + (int)y;
+		if (dy < 0 || dy >= height) {
+			continue;
+		}
+		UINT32 sy = client->cursor_height - 1 - y;
+		for (UINT32 x = 0; x < client->cursor_width; x++) {
+			int dx = left + (int)x;
+			if (dx < 0 || dx >= width) {
+				continue;
+			}
+			const BYTE* src = client->cursor_xor + sy * src_stride + x * 4;
+			BYTE b = src[0];
+			BYTE g = src[1];
+			BYTE r = src[2];
+			BYTE a = src[3];
+			if (a == 0 && flow_rdp_cursor_and_bit(client->cursor_and, client->cursor_and_len, client->cursor_width, x, sy)) {
+				continue;
+			}
+			unsigned char* out = dst + dy * stride + dx * 4;
+			if (a == 0) {
+				continue;
+			}
+			if (a == 255) {
+				out[0] = r;
+				out[1] = g;
+				out[2] = b;
+				out[3] = 255;
+				continue;
+			}
+			out[0] = (unsigned char)((r * a + out[0] * (255 - a)) / 255);
+			out[1] = (unsigned char)((g * a + out[1] * (255 - a)) / 255);
+			out[2] = (unsigned char)((b * a + out[2] * (255 - a)) / 255);
+			out[3] = 255;
+		}
+	}
+}
+
 static int flow_rdp_copy_frame(flow_rdp_client* client, unsigned char* dst, int dst_len, int* out_width, int* out_height) {
 	if (!client || !client->instance || !client->instance->context || !client->instance->context->gdi) {
 		return -1;
@@ -578,6 +757,7 @@ static int flow_rdp_copy_frame(flow_rdp_client* client, unsigned char* dst, int 
 			dst_row[x * 4 + 3] = a ? a : 255;
 		}
 	}
+	flow_rdp_blend_cursor(client, dst, width, height, dst_stride);
 	*out_width = width;
 	*out_height = height;
 	LeaveCriticalSection(&client->lock);
@@ -604,6 +784,10 @@ static int flow_rdp_mouse(flow_rdp_client* client, UINT16 flags, UINT16 x, UINT1
 	}
 	EnterCriticalSection(&client->lock);
 	BOOL ok = client->instance->input->MouseEvent(client->instance->input, flags, x, y);
+	if (ok && !(flags & PTR_FLAGS_WHEEL)) {
+		client->cursor_x = x;
+		client->cursor_y = y;
+	}
 	LeaveCriticalSection(&client->lock);
 	return ok ? 0 : -1;
 }
