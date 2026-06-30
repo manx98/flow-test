@@ -388,7 +388,7 @@ func imageFromAny(value any) (image.Image, bool) {
 
 func thresholdFromCall(call goja.FunctionCall) float64 {
 	if len(call.Arguments) < 2 || goja.IsUndefined(call.Argument(1)) || goja.IsNull(call.Argument(1)) {
-		return 0.99
+		return 0.85
 	}
 	options := call.Argument(1).Export()
 	if m, ok := options.(map[string]any); ok {
@@ -399,7 +399,7 @@ func thresholdFromCall(call goja.FunctionCall) float64 {
 			return v
 		}
 	}
-	return 0.99
+	return 0.85
 }
 
 func masksFromCall(call goja.FunctionCall) []image.Image {

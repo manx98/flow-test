@@ -404,7 +404,7 @@ func (FindImage) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) 
 		if maskOK {
 			masks = append(masks, maskImage)
 		}
-		match, ok, err := vision.FindTemplate(sourceImage, templateImage, numberFloatProp(node, "threshold", 0.99), masks...)
+		match, ok, err := vision.FindTemplate(sourceImage, templateImage, imageSimilarityProp(node), masks...)
 		if err != nil {
 			return "", err
 		}
@@ -456,7 +456,7 @@ func (FindAll) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) (s
 		if maskOK {
 			masks = append(masks, maskImage)
 		}
-		matches, err := vision.FindAllTemplates(sourceImage, templateImage, numberFloatProp(node, "threshold", 0.99), masks...)
+		matches, err := vision.FindAllTemplates(sourceImage, templateImage, imageSimilarityProp(node), masks...)
 		if err != nil {
 			return "", err
 		}
@@ -1155,6 +1155,15 @@ func numberFloatProp(node *flow.Node, name string, fallback float64) float64 {
 	}
 }
 
+func imageSimilarityProp(node *flow.Node) float64 {
+	if node != nil && node.Properties != nil {
+		if _, ok := node.Properties["threshold"]; ok {
+			return numberFloatProp(node, "threshold", 0.7)
+		}
+	}
+	return numberFloatProp(node, "similarity", 0.7)
+}
+
 func stringProp(node *flow.Node, name string, fallback string) string {
 	if node.Properties == nil {
 		return fallback
@@ -1616,7 +1625,7 @@ func findImageOnce(ctx context.Context, rc *flow.RunContext, node *flow.Node) (v
 	if maskOK {
 		masks = append(masks, maskImage)
 	}
-	match, found, err := vision.FindTemplate(sourceImage, templateImage, numberFloatProp(node, "threshold", 0.99), masks...)
+	match, found, err := vision.FindTemplate(sourceImage, templateImage, imageSimilarityProp(node), masks...)
 	return match, found, true, err
 }
 

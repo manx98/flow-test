@@ -3,6 +3,7 @@ package vision
 import (
 	"fmt"
 	"image"
+	"sort"
 
 	"gocv.io/x/gocv"
 )
@@ -95,6 +96,9 @@ func FindAllTemplates(source image.Image, template image.Image, threshold float6
 		return nil, err
 	}
 	matches := matchesFromResult(result, threshold, tplW, tplH)
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Score > matches[j].Score
+	})
 	return suppressOverlaps(matches), nil
 }
 

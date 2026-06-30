@@ -37,6 +37,23 @@ func TestFindTemplate(t *testing.T) {
 	}
 }
 
+func TestFindTemplateReturnsBestScore(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 8, 3))
+	fill(src, color.RGBA{R: 10, G: 10, B: 10, A: 255})
+	drawRect(src, image.Rect(1, 1, 3, 3), color.RGBA{R: 210, G: 30, B: 40, A: 255})
+	drawRect(src, image.Rect(5, 1, 7, 3), color.RGBA{R: 220, G: 30, B: 40, A: 255})
+	tpl := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	fill(tpl, color.RGBA{R: 220, G: 30, B: 40, A: 255})
+
+	match, ok, err := FindTemplate(src, tpl, 0.8)
+	if err != nil {
+		t.Fatalf("FindTemplate() error = %v", err)
+	}
+	if !ok || match.X != 5 || match.Y != 1 {
+		t.Fatalf("best match ok=%v match=%#v", ok, match)
+	}
+}
+
 func TestFindAllTemplatesNoMatchAndTooLarge(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	fill(src, color.RGBA{R: 1, G: 1, B: 1, A: 255})
