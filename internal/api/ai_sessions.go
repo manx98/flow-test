@@ -328,6 +328,7 @@ func selectedGraphSkillDocs(state map[string]any) []map[string]any {
 	}
 	addByNeed(needsScriptDocs(query), "script/DOC.md", "script/script_js/DOC.md", "script/script_js_exec/DOC.md", "test/assert_check/DOC.md", "test/test_result/DOC.md")
 	addByNeed(containsAny(query, "api", "http", "https", "request", "json", "form", "接口", "请求", "表单", "序列化"), "api/DOC.md", "api/api_request/DOC.md", "api/api_json_serialize/DOC.md", "api/api_form_serialize/DOC.md")
+	addByNeed(containsAny(query, "regex", "regexp", "正则", "提取", "匹配"), "regex/DOC.md", "regex/regex_find/DOC.md")
 	addByNeed(containsAny(query, "click", "type", "hotkey", "scroll", "drag", "点击", "输入", "快捷键", "滚动", "拖拽"), "action/DOC.md")
 	addByNeed(containsAny(query, "image", "picture", "vision", "ocr", "text", "mask", "找图", "图片", "视觉", "识别", "文字", "遮罩"), "vision/DOC.md", "ocr/DOC.md")
 	addByNeed(containsAny(query, "wait", "delay", "appear", "vanish", "等待", "出现", "消失"), "wait/DOC.md")

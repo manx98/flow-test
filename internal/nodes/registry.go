@@ -69,6 +69,7 @@ func NewRegistry() *Registry {
 	r.Register("util/log", Log{})
 	r.Register("util/alert", Alert{})
 	r.Register("data/text_display", TextDisplay{})
+	r.Register("regex/find", RegexFind{})
 	return r
 }
 
@@ -845,6 +846,26 @@ func (TextDisplay) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node
 	return "out", nil
 }
 
+type RegexFind struct{}
+
+func (RegexFind) Eval(ctx context.Context, rc *flow.RunContext, node *flow.Node) (map[string]any, error) {
+	return regexFind(ctx, rc, node)
+}
+
+func (RegexFind) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) (string, error) {
+	out, err := regexFind(ctx, rc, node)
+	if err != nil {
+		return "", err
+	}
+	for name, value := range out {
+		rc.SetOutput(node, name, value)
+	}
+	if out["ok"] == true {
+		return "found", nil
+	}
+	return "notFound", nil
+}
+
 type VarGet struct{}
 
 func (VarGet) Eval(_ context.Context, rc *flow.RunContext, node *flow.Node) (map[string]any, error) {
@@ -1195,6 +1216,34 @@ func textDisplayValue(ctx context.Context, rc *flow.RunContext, node *flow.Node)
 		return "", nil
 	}
 	return fmt.Sprint(value), nil
+}
+
+func regexFind(ctx context.Context, rc *flow.RunContext, node *flow.Node) (map[string]any, error) {
+	text, err := inputString(ctx, rc, node, "text", "text", "")
+	if err != nil {
+		return nil, err
+	}
+	pattern, err := inputString(ctx, rc, node, "pattern", "pattern", "")
+	if err != nil {
+		return nil, err
+	}
+	if pattern == "" {
+		return nil, fmt.Errorf("regex pattern is required")
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+	}
+	loc := re.FindStringSubmatchIndex(text)
+	if loc == nil {
+		return map[string]any{"ok": false, "match": ""}, nil
+	}
+	for i := 2; i < len(loc); i += 2 {
+		if loc[i] >= 0 {
+			return map[string]any{"ok": true, "match": text[loc[i]:loc[i+1]]}, nil
+		}
+	}
+	return map[string]any{"ok": true, "match": text[loc[0]:loc[1]]}, nil
 }
 
 func boolOf(value any) bool {

@@ -76,6 +76,32 @@ func TestJSONAndFormSerialize(t *testing.T) {
 	}
 }
 
+func TestRegexFind(t *testing.T) {
+	graph := flow.Graph{
+		Nodes: []flow.Node{
+			{ID: 1, Type: "regex/find", Properties: map[string]any{"text": "order id: A-42", "pattern": `([A-Z])-(\d+)`}},
+		},
+	}
+	registry := NewRegistry()
+	runner := flow.NewRunner(graph, registry, &flow.CollectingSink{})
+	rc := &flow.RunContext{Runner: runner}
+	port, err := registry.handlers["regex/find"].Run(context.Background(), rc, &graph.Nodes[0])
+	if err != nil {
+		t.Fatalf("regex find error = %v", err)
+	}
+	if port != "found" {
+		t.Fatalf("port = %s, want found", port)
+	}
+	if runner.Values[flow.OutputRef{NodeID: 1, Port: "ok"}] != true ||
+		runner.Values[flow.OutputRef{NodeID: 1, Port: "match"}] != "A" {
+		t.Fatalf("regex outputs = %#v", runner.Values)
+	}
+	graph.Nodes[0].Properties["pattern"] = "["
+	if _, err := registry.handlers["regex/find"].Run(context.Background(), rc, &graph.Nodes[0]); err == nil {
+		t.Fatal("invalid regex error = nil")
+	}
+}
+
 func TestAPIRequestSetsOutputsAndSuccessBranch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
