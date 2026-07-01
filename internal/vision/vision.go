@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"image"
 	"sort"
-
-	"gocv.io/x/gocv"
 )
 
 type Point struct {
@@ -75,12 +73,12 @@ func FindAllTemplates(source image.Image, template image.Image, threshold float6
 		return []Match{}, nil
 	}
 
-	sourceMat, err := gocv.ImageToMatRGB(source)
+	sourceMat, err := imageToMatRGB(source)
 	if err != nil {
 		return nil, err
 	}
 	defer sourceMat.Close()
-	templateMat, err := gocv.ImageToMatRGB(template)
+	templateMat, err := imageToMatRGB(template)
 	if err != nil {
 		return nil, err
 	}
@@ -90,9 +88,9 @@ func FindAllTemplates(source image.Image, template image.Image, threshold float6
 		return nil, err
 	}
 	defer maskMat.Close()
-	result := gocv.NewMat()
+	result := newMat()
 	defer result.Close()
-	if err := gocv.MatchTemplate(sourceMat, templateMat, &result, gocv.TmSqdiffNormed, maskMat); err != nil {
+	if err := matchTemplate(sourceMat, templateMat, &result, maskMat); err != nil {
 		return nil, err
 	}
 	matches := matchesFromResult(result, threshold, tplW, tplH)
@@ -102,7 +100,7 @@ func FindAllTemplates(source image.Image, template image.Image, threshold float6
 	return suppressOverlaps(matches), nil
 }
 
-func matchesFromResult(result gocv.Mat, threshold float64, tplW int, tplH int) []Match {
+func matchesFromResult(result mat, threshold float64, tplW int, tplH int) []Match {
 	matches := []Match{}
 	for row := 0; row < result.Rows(); row++ {
 		for col := 0; col < result.Cols(); col++ {
@@ -116,7 +114,7 @@ func matchesFromResult(result gocv.Mat, threshold float64, tplW int, tplH int) [
 	return matches
 }
 
-func templateMaskMat(template image.Image, mask image.Image) (gocv.Mat, error) {
+func templateMaskMat(template image.Image, mask image.Image) (mat, error) {
 	tplBounds := template.Bounds()
 	useMask := mask != nil
 	for y := 0; y < tplBounds.Dy(); y++ {
@@ -129,9 +127,9 @@ func templateMaskMat(template image.Image, mask image.Image) (gocv.Mat, error) {
 		}
 	}
 	if !useMask {
-		return gocv.NewMat(), nil
+		return newMat(), nil
 	}
-	mat := gocv.NewMatWithSize(tplBounds.Dy(), tplBounds.Dx(), gocv.MatTypeCV8UC1)
+	mat := newMatWithSize(tplBounds.Dy(), tplBounds.Dx(), matTypeCV8UC1)
 	for y := 0; y < tplBounds.Dy(); y++ {
 		for x := 0; x < tplBounds.Dx(); x++ {
 			_, _, _, ta := template.At(tplBounds.Min.X+x, tplBounds.Min.Y+y).RGBA()

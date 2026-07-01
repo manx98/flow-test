@@ -13,7 +13,6 @@ require (
 	github.com/pion/mediadevices v0.10.0
 	github.com/pion/webrtc/v4 v4.2.15
 	github.com/vmware/govmomi v0.54.1
-	gocv.io/x/gocv v0.43.0
 )
 
 require (
