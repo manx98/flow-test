@@ -1,2 +1,0 @@
-"""Server locale resources."""
-
