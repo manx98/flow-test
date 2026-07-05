@@ -45,7 +45,7 @@ func NewRegistry() *Registry {
 	r.Register("vision/find_all", FindAll{})
 	r.Register("mask/create", MaskCreate{})
 	r.Register("ocr/tesseract", OCREngine{Kind: "tesseract"})
-	r.Register("ocr/paddle", OCREngine{Kind: "paddle", Unsupported: true})
+	r.Register("ocr/paddle", OCREngine{Kind: "paddle"})
 	r.Register("geom/to_point", ToPoint{})
 	r.Register("action/click", ActionClick{})
 	r.Register("action/type", ActionType{})
@@ -512,13 +512,18 @@ func (FindText) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) (
 	target := fmt.Sprint(textValue)
 	blocks := textBlocksFromValue(video)
 	minConfidence := ocrMinConfidence(ocrValue)
-	if len(blocks) == 0 && isTesseractOCR(ocrValue) {
+	if len(blocks) == 0 && isRunnableOCR(ocrValue) {
 		sourceImage, ok, err := imageFromValue(ctx, video)
 		if err != nil {
 			return "", err
 		}
 		if ok {
-			blocks, err = ocr.RecognizeTesseract(sourceImage, tesseractConfig(ocrValue))
+			switch ocrKind(ocrValue) {
+			case "tesseract":
+				blocks, err = ocr.RecognizeTesseract(sourceImage, tesseractConfig(ocrValue))
+			case "paddle":
+				blocks, err = ocr.RecognizePaddle(sourceImage, paddleConfig(ocrValue))
+			}
 			if err != nil {
 				return "", err
 			}
@@ -1425,12 +1430,22 @@ func ocrMinConfidence(value any) float64 {
 	return min
 }
 
-func isTesseractOCR(value any) bool {
+func isRunnableOCR(value any) bool {
 	m, ok := value.(map[string]any)
 	if !ok {
 		return false
 	}
-	return fmt.Sprint(m["kind"]) == "tesseract" && !boolOf(m["unsupported"])
+	switch fmt.Sprint(m["kind"]) {
+	case "tesseract", "paddle":
+		return !boolOf(m["unsupported"])
+	default:
+		return false
+	}
+}
+
+func ocrKind(value any) string {
+	m, _ := value.(map[string]any)
+	return fmt.Sprint(m["kind"])
 }
 
 func tesseractConfig(value any) ocr.TesseractConfig {
@@ -1441,6 +1456,22 @@ func tesseractConfig(value any) ocr.TesseractConfig {
 		Config:         stringOr(config["config"], ""),
 		TessdataPrefix: stringOr(config["tessdata_prefix"], ""),
 		MinConfidence:  numberOf(config["min_confidence"], 0),
+	}
+}
+
+func paddleConfig(value any) ocr.PaddleConfig {
+	m, _ := value.(map[string]any)
+	config, _ := m["config"].(map[string]any)
+	useAngleCls, ok := config["use_angle_cls"]
+	redetect, redetectSet := config["redetect"]
+	return ocr.PaddleConfig{
+		DetModel:      stringOr(config["det_model"], "PP_OCRv6_small_det"),
+		RecModel:      stringOr(config["rec_model"], "PP_OCRv6_small_rec"),
+		TextlineModel: stringOr(config["textline_model"], "PP_LCNet_x0_25_textline_ori"),
+		MinConfidence: numberOf(config["min_confidence"], 0),
+		UseAngleCls:   !ok || boolOf(useAngleCls),
+		UseVulkan:     boolOf(config["use_gpu"]),
+		Redetect:      !redetectSet || boolOf(redetect),
 	}
 }
 

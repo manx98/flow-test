@@ -15,3 +15,13 @@ type TesseractConfig struct {
 	TessdataPrefix string
 	MinConfidence  float64
 }
+
+type PaddleConfig struct {
+	DetModel      string
+	RecModel      string
+	TextlineModel string
+	MinConfidence float64
+	UseAngleCls   bool
+	UseVulkan     bool
+	Redetect      bool
+}

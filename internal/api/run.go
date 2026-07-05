@@ -60,6 +60,18 @@ type runResult struct {
 	Err    error
 }
 
+type liveRunSink struct {
+	events    []flow.Event
+	writeJSON func(any) bool
+}
+
+func (s *liveRunSink) Emit(event flow.Event) {
+	s.events = append(s.events, event)
+	if event.Type != "run" {
+		s.writeJSON(event)
+	}
+}
+
 func runGraph(ctx context.Context, graph flow.Graph) runResult {
 	sink := &flow.CollectingSink{}
 	runner := flow.NewRunner(graph, nodes.NewRegistry(), sink)
@@ -178,15 +190,7 @@ func (s *Server) runGraphWebSocket(ctx context.Context, projectName string, p in
 	if !writeJSON(gin.H{"type": "run", "status": "start"}) {
 		return
 	}
-	result := s.runGraphForProject(ctx, projectName, p, runName, graph)
-	for _, event := range result.Events {
-		if event.Type == "run" {
-			continue
-		}
-		if !writeJSON(event) {
-			return
-		}
-	}
+	result := s.runGraphForProjectLive(ctx, projectName, p, runName, graph, writeJSON)
 	saveErr := saveRunArtifacts(p, projectName, runName, result.Report)
 	if result.Err != nil {
 		writeJSON(gin.H{"type": "run", "status": "error", "error": result.Err.Error()})
@@ -200,6 +204,36 @@ func (s *Server) runGraphWebSocket(ctx context.Context, projectName string, p in
 		done["save_error"] = saveErr.Error()
 	}
 	writeJSON(done)
+}
+
+func (s *Server) runGraphForProjectLive(ctx context.Context, projectName string, p projectRuntime, runName string, graph flow.Graph, writeJSON func(any) bool) runResult {
+	sink := &liveRunSink{writeJSON: writeJSON}
+	runner := flow.NewRunner(graph, nodes.NewRegistry(), sink)
+	runner.DeviceResolver = func(node *flow.Node) (any, bool) {
+		return s.devices.RefByProjectNode(projectName, node.ID)
+	}
+	runner.ImageResolver = func(name string) (any, bool, error) {
+		img, err := p.LoadImage(name)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		return img, true, nil
+	}
+	if runName != "" {
+		runner.ShotSink = func(nodeID int64, img image.Image, rects []image.Rectangle) (string, error) {
+			name, err := saveNodeShot(p, runName, nodeID, img, rects)
+			if err != nil {
+				return "", err
+			}
+			return "/api/projects/" + projectName + "/results/" + runName + "/" + name, nil
+		}
+	}
+	err := runner.Run(ctx)
+	report := flow.ReportFromEvents(sink.events, err)
+	return runResult{Events: sink.events, Report: report, Err: err}
 }
 
 type runArtifactWriter interface {

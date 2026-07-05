@@ -553,12 +553,19 @@ func TestRunWebSocket(t *testing.T) {
 	if err := conn.WriteJSON(map[string]any{"cmd": "run", "graph": graph}); err != nil {
 		t.Fatalf("WriteJSON() error = %v", err)
 	}
+	sawRunning := false
 	for i := 0; i < 10; i++ {
 		var msg map[string]any
 		if err := conn.ReadJSON(&msg); err != nil {
 			t.Fatalf("ReadJSON() error = %v", err)
 		}
+		if msg["type"] == "node" && msg["status"] == "running" {
+			sawRunning = true
+		}
 		if msg["type"] == "run" && msg["status"] == "done" {
+			if !sawRunning {
+				t.Fatalf("missing live node running before done")
+			}
 			if msg["report"] == nil {
 				t.Fatalf("missing report in done message: %#v", msg)
 			}

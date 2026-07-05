@@ -768,6 +768,35 @@ func TestOCREngineAndFindTextWithoutBlocks(t *testing.T) {
 	}
 }
 
+func TestPaddleOCREngineIsSupported(t *testing.T) {
+	registry := NewRegistry()
+	out, err := registry.handlers["ocr/paddle"].Eval(context.Background(), &flow.RunContext{}, &flow.Node{
+		Properties: map[string]any{"use_angle_cls": true},
+	})
+	if err != nil {
+		t.Fatalf("ocr eval error = %v", err)
+	}
+	ocrRef := out["ocr"].(map[string]any)
+	if ocrRef["kind"] != "paddle" || ocrRef["unsupported"] == true {
+		t.Fatalf("ocr ref = %#v", ocrRef)
+	}
+}
+
+func TestPaddleConfigRedetectDefault(t *testing.T) {
+	cfg := paddleConfig(map[string]any{"kind": "paddle", "config": map[string]any{}})
+	if !cfg.Redetect {
+		t.Fatalf("Redetect default = false")
+	}
+	cfg = paddleConfig(map[string]any{"kind": "paddle", "config": map[string]any{"redetect": false}})
+	if cfg.Redetect {
+		t.Fatalf("Redetect explicit false = true")
+	}
+	cfg = paddleConfig(map[string]any{"kind": "paddle", "config": map[string]any{"min_confidence": 50}})
+	if cfg.MinConfidence != 50 {
+		t.Fatalf("MinConfidence = %v", cfg.MinConfidence)
+	}
+}
+
 func TestFindTextMatchesOCRBlocks(t *testing.T) {
 	graph := flow.Graph{
 		Nodes: []flow.Node{

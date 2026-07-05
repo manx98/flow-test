@@ -1,7 +1,8 @@
 package vision
 
 /*
-#cgo linux pkg-config: opencv4
+#cgo linux CXXFLAGS: -std=c++11 -I${SRCDIR}/../../libs/include/opencv4
+#cgo linux LDFLAGS: -L${SRCDIR}/../../libs/lib -Wl,-rpath,${SRCDIR}/../../libs/lib -lopencv_imgcodecs -lopencv_imgproc -lopencv_core
 #cgo windows CXXFLAGS: -std=c++11
 #cgo windows LDFLAGS: -lopencv_core -lopencv_imgproc
 #include <stdlib.h>
