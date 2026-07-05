@@ -510,9 +510,18 @@ func (FindText) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) (
 		return "", err
 	}
 	target := fmt.Sprint(textValue)
+	trimmedTarget := strings.TrimSpace(target)
 	blocks := textBlocksFromValue(video)
 	minConfidence := ocrMinConfidence(ocrValue)
-	if len(blocks) == 0 && isRunnableOCR(ocrValue) {
+	regex := boolProp(node, "regex", false)
+	var pattern *regexp.Regexp
+	if regex && trimmedTarget != "" {
+		pattern, err = regexp.Compile(trimmedTarget)
+		if err != nil {
+			return "", err
+		}
+	}
+	if len(blocks) == 0 && trimmedTarget != "" && isRunnableOCR(ocrValue) {
 		sourceImage, ok, err := imageFromValue(ctx, video)
 		if err != nil {
 			return "", err
@@ -522,14 +531,16 @@ func (FindText) Run(ctx context.Context, rc *flow.RunContext, node *flow.Node) (
 			case "tesseract":
 				blocks, err = ocr.RecognizeTesseract(sourceImage, tesseractConfig(ocrValue))
 			case "paddle":
-				blocks, err = ocr.RecognizePaddle(sourceImage, paddleConfig(ocrValue))
+				blocks, err = ocr.RecognizePaddleUntil(sourceImage, paddleConfig(ocrValue), func(block ocr.TextBlock) bool {
+					return block.Confidence >= minConfidence && textMatches(block.Text, trimmedTarget, pattern)
+				})
 			}
 			if err != nil {
 				return "", err
 			}
 		}
 	}
-	match, found, err := findTextBlock(blocks, target, boolProp(node, "regex", false), minConfidence)
+	match, found, err := findTextBlock(blocks, target, regex, minConfidence)
 	if err != nil {
 		return "", err
 	}

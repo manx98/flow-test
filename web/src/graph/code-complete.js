@@ -2,7 +2,7 @@
 // 用法：attachCompletion(textarea, onChange) —— onChange 在补全插入后调用以同步外部状态。
 import { api } from '../api.js'
 
-const PC = ['click', 'type', 'hotkey', 'findImage', 'findAll', 'findText', 'wait', 'log']
+const PC = ['click', 'type', 'hotkey', 'findImage', 'findAll', 'findText', 'ocr', 'wait', 'log']
 const DEVICE = ['click', 'type', 'hotkey', 'capture']
 const FLOW = ['image', 'find_image', 'find_text', 'find_all', 'wait_appear', 'wait_vanish',
   'to_point', 'click', 'type_text', 'scroll', 'drag', 'delay', 'log', 'alert', 'get_var', 'set_var']
@@ -10,7 +10,7 @@ const VARS = ['get', 'set', 'keys']
 const JSON_MEMBERS = ['parse', 'stringify']
 const MATH = ['abs', 'ceil', 'floor', 'max', 'min', 'round', 'random']
 const MEMBERS = { pc: PC, device: DEVICE, flow: FLOW, vars: VARS, JSON: JSON_MEMBERS, Math: MATH }
-const GLOBALS = ['getArg', 'setResult', 'log', 'pc', 'flow', 'vars', 'device', 'JSON', 'Math',
+const GLOBALS = ['getArg', 'setResult', 'log', 'flow', 'vars', 'device', 'JSON', 'Math',
   'Array', 'Object', 'String', 'Number', 'Boolean', 'Date', 'RegExp', 'Error']
 const KEYWORDS = ['break', 'case', 'catch', 'class', 'const', 'continue', 'default', 'do', 'else',
   'false', 'finally', 'for', 'function', 'if', 'let', 'new', 'null', 'return', 'switch', 'throw',

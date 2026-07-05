@@ -277,6 +277,30 @@ setResult('x', found.rect.x)
 	}
 }
 
+func TestRuntimeDeviceWrapperOCRUsesOptionBlocks(t *testing.T) {
+	resp, err := NewRuntime().Run(context.Background(), Request{
+		Code: `
+const pc = getArg('pc')
+const blocks = [{text: 'Hello OCR', confidence: 0.9, x: 5, y: 6, w: 40, h: 12}]
+const ocr = pc.ocr({blocks})
+const found = pc.findText('OCR', {blocks})
+setResult('ocrOk', ocr.ok)
+setResult('count', ocr.blocks.length)
+setResult('found', found.ok)
+setResult('text', found.text)
+`,
+		Args: map[string]any{
+			"pc": map[string]any{"resource": "device", "kind": "rdp", "unsupported": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Results["ocrOk"] != true || resp.Results["count"] != int64(1) || resp.Results["found"] != true || resp.Results["text"] != "Hello OCR" {
+		t.Fatalf("results = %#v", resp.Results)
+	}
+}
+
 func TestRuntimeDeviceWrapperFindTextUnsupportedWithoutBlocks(t *testing.T) {
 	resp, err := NewRuntime().Run(context.Background(), Request{
 		Code: "const found = getArg('pc').findText('Login'); setResult('ok', found.ok); setResult('unsupported', found.unsupported)",

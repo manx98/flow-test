@@ -10,7 +10,11 @@
     },
     {
       "sig": "设备.findText(text, options)",
-      "desc": "找文字：返回 {ok, point, rect, text, score}"
+      "desc": "找文字：返回 {ok, point, rect, text, score}；无预置 blocks 时会截图并执行 OCR"
+    },
+    {
+      "sig": "设备.ocr(options)",
+      "desc": "OCR：返回 {ok, blocks, unsupported}；默认使用 PaddleOCR，可传 engine=tesseract"
     },
     {
       "sig": "设备.click(point, options)",

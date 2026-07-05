@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"flow-test-go/internal/device"
+	"flow-test-go/internal/ocr"
 	"flow-test-go/internal/vision"
 
 	"github.com/dop251/goja"
@@ -134,7 +135,29 @@ func (b bindings) deviceWrapper(ref device.Ref) goja.Value {
 	_ = obj.Set("findText", func(call goja.FunctionCall) goja.Value {
 		target := call.Argument(0).String()
 		options := mapFromAny(call.Argument(1).Export())
-		match, ok, err := findTextInBlocks(textBlocksFromAny(ref.Config["blocks"]), target, boolFromAny(options["regex"]), numberFromAny(options["minConfidence"]))
+		regex := boolFromAny(options["regex"])
+		minConfidence := numberFromAny(options["minConfidence"])
+		trimmedTarget := strings.TrimSpace(target)
+		blocks := textBlocksFromAny(firstAny(options["blocks"], ref.Config["blocks"]))
+		unsupported := false
+		if len(blocks) == 0 && trimmedTarget != "" {
+			if ref.Device == nil {
+				unsupported = true
+			} else {
+				var pattern *regexp.Regexp
+				if regex {
+					var err error
+					pattern, err = regexp.Compile(trimmedTarget)
+					if err != nil {
+						panic(b.vm.ToValue(err.Error()))
+					}
+				}
+				blocks, unsupported = b.recognizeDeviceOCR(ref, options, func(block ocr.TextBlock) bool {
+					return block.Confidence >= normalizeConfidence(minConfidence) && textMatches(block.Text, trimmedTarget, pattern)
+				})
+			}
+		}
+		match, ok, err := findTextInBlocks(blocks, target, regex, minConfidence)
 		if err != nil {
 			panic(b.vm.ToValue(err.Error()))
 		}
@@ -147,8 +170,16 @@ func (b bindings) deviceWrapper(ref device.Ref) goja.Value {
 			"rect":        nil,
 			"text":        target,
 			"score":       0,
-			"unsupported": ref.Device == nil && len(textBlocksFromAny(ref.Config["blocks"])) == 0,
+			"unsupported": unsupported,
 		})
+	})
+	_ = obj.Set("ocr", func(call goja.FunctionCall) goja.Value {
+		options := mapFromAny(call.Argument(0).Export())
+		blocks, unsupported := b.ocrBlocks(ref, options)
+		if unsupported {
+			return b.vm.ToValue(map[string]any{"ok": false, "blocks": []any{}, "unsupported": true})
+		}
+		return b.vm.ToValue(map[string]any{"ok": true, "blocks": textBlocksToMaps(blocks), "unsupported": false})
 	})
 	_ = obj.Set("click", func(call goja.FunctionCall) goja.Value {
 		point := call.Argument(0).Export()
@@ -215,6 +246,47 @@ func (b bindings) deviceWrapper(ref device.Ref) goja.Value {
 	return obj
 }
 
+func (b bindings) ocrBlocks(ref device.Ref, options map[string]any) ([]textBlock, bool) {
+	if blocks := textBlocksFromAny(firstAny(options["blocks"], ref.Config["blocks"])); len(blocks) > 0 {
+		return blocks, false
+	}
+	if ref.Device == nil {
+		return nil, true
+	}
+	return b.recognizeDeviceOCR(ref, options, nil)
+}
+
+func (b bindings) recognizeDeviceOCR(ref device.Ref, options map[string]any, accept func(ocr.TextBlock) bool) ([]textBlock, bool) {
+	source, err := device.CaptureImage(b.ctx, ref.Device)
+	if err != nil {
+		panic(b.vm.ToValue(err.Error()))
+	}
+	var raw []ocr.TextBlock
+	switch strings.ToLower(stringFromAny(firstAny(options["engine"], ref.Config["ocr_engine"], "paddle"))) {
+	case "tesseract":
+		raw, err = ocr.RecognizeTesseract(source, ocr.TesseractConfig{
+			Lang:           stringDefault(stringFromAny(options["lang"]), "eng"),
+			Config:         stringFromAny(options["config"]),
+			TessdataPrefix: stringFromAny(options["tessdataPrefix"]),
+			MinConfidence:  numberFromAny(options["minConfidence"]),
+		})
+	default:
+		raw, err = ocr.RecognizePaddleUntil(source, ocr.PaddleConfig{
+			DetModel:      stringFromAny(options["detModel"]),
+			RecModel:      stringFromAny(options["recModel"]),
+			TextlineModel: stringFromAny(options["textlineModel"]),
+			MinConfidence: numberFromAny(options["minConfidence"]),
+			UseAngleCls:   !hasOption(options, "useAngleCls") || boolFromAny(options["useAngleCls"]),
+			UseVulkan:     boolFromAny(options["useGpu"]),
+			Redetect:      !hasOption(options, "redetect") || boolFromAny(options["redetect"]),
+		}, accept)
+	}
+	if err != nil {
+		panic(b.vm.ToValue(err.Error()))
+	}
+	return textBlocksFromOCR(raw), false
+}
+
 func formatPoint(value any) string {
 	switch v := value.(type) {
 	case map[string]any:
@@ -235,6 +307,8 @@ type textBlock struct {
 
 func textBlocksFromAny(value any) []textBlock {
 	switch v := value.(type) {
+	case []ocr.TextBlock:
+		return textBlocksFromOCR(v)
 	case []any:
 		out := make([]textBlock, 0, len(v))
 		for _, item := range v {
@@ -262,6 +336,36 @@ func textBlocksFromAny(value any) []textBlock {
 		}
 	}
 	return nil
+}
+
+func textBlocksFromOCR(values []ocr.TextBlock) []textBlock {
+	out := make([]textBlock, 0, len(values))
+	for _, block := range values {
+		out = append(out, textBlock{
+			Text:       block.Text,
+			Confidence: block.Confidence,
+			X:          block.X,
+			Y:          block.Y,
+			W:          block.W,
+			H:          block.H,
+		})
+	}
+	return out
+}
+
+func textBlocksToMaps(blocks []textBlock) []map[string]any {
+	out := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		out = append(out, map[string]any{
+			"text":       block.Text,
+			"confidence": block.Confidence,
+			"x":          block.X,
+			"y":          block.Y,
+			"w":          block.W,
+			"h":          block.H,
+		})
+	}
+	return out
 }
 
 func textBlockFromAny(value any) (textBlock, bool) {
@@ -293,9 +397,7 @@ func findTextInBlocks(blocks []textBlock, target string, regex bool, minConfiden
 			return nil, false, err
 		}
 	}
-	if minConfidence > 1 {
-		minConfidence = minConfidence / 100
-	}
+	minConfidence = normalizeConfidence(minConfidence)
 	for _, block := range blocks {
 		if block.Confidence < minConfidence {
 			continue
@@ -316,6 +418,20 @@ func findTextInBlocks(blocks []textBlock, target string, regex bool, minConfiden
 		}, true, nil
 	}
 	return nil, false, nil
+}
+
+func textMatches(text string, target string, pattern *regexp.Regexp) bool {
+	if pattern != nil {
+		return pattern.MatchString(text)
+	}
+	return strings.Contains(text, target)
+}
+
+func normalizeConfidence(value float64) float64 {
+	if value > 1 {
+		return value / 100
+	}
+	return value
 }
 
 func firstAny(values ...any) any {
@@ -375,6 +491,25 @@ func numberFromAny(value any) float64 {
 func boolFromAny(value any) bool {
 	b, _ := value.(bool)
 	return b
+}
+
+func stringFromAny(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
+func stringDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func hasOption(options map[string]any, key string) bool {
+	_, ok := options[key]
+	return ok
 }
 
 func imageFromAny(value any) (image.Image, bool) {

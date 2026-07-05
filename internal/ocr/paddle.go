@@ -20,6 +20,10 @@ import (
 )
 
 func RecognizePaddle(img image.Image, cfg PaddleConfig) ([]TextBlock, error) {
+	return RecognizePaddleUntil(img, cfg, nil)
+}
+
+func RecognizePaddleUntil(img image.Image, cfg PaddleConfig, accept func(TextBlock) bool) ([]TextBlock, error) {
 	if img == nil {
 		return nil, fmt.Errorf("image is required for paddle OCR")
 	}
@@ -89,6 +93,9 @@ func RecognizePaddle(img image.Image, cfg PaddleConfig) ([]TextBlock, error) {
 				return nil, err
 			}
 			if ok {
+				if accept != nil && accept(block) {
+					return []TextBlock{block}, nil
+				}
 				blocks = append(blocks, block)
 			}
 			continue
@@ -108,6 +115,10 @@ func RecognizePaddle(img image.Image, cfg PaddleConfig) ([]TextBlock, error) {
 				return nil, err
 			}
 			if ok {
+				if accept != nil && accept(block) {
+					C.paddle_ocr_engine_free_boxes(refined)
+					return []TextBlock{block}, nil
+				}
 				blocks = append(blocks, block)
 			}
 		}
